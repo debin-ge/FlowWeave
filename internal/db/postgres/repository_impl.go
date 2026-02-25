@@ -1,10 +1,10 @@
 package postgres
 
 import (
-	applog "flowweave/internal/platform/log"
 	"context"
 	"database/sql"
 	"encoding/json"
+	applog "flowweave/internal/platform/log"
 	"fmt"
 	"strings"
 	"time"
@@ -269,10 +269,16 @@ func (r *Repository) CreateWorkflow(ctx context.Context, w *Workflow) error {
 func (r *Repository) GetWorkflow(ctx context.Context, id string) (*Workflow, error) {
 	w := &Workflow{}
 	var orgID, tenantID sql.NullString
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, COALESCE(org_id::text,''), COALESCE(tenant_id::text,''), name, description, dsl_json, version, status, created_at, updated_at
-		 FROM workflows WHERE id = $1`, id,
-	).Scan(&w.ID, &orgID, &tenantID, &w.Name, &w.Description, &w.DSL, &w.Version, &w.Status, &w.CreatedAt, &w.UpdatedAt)
+	query := `SELECT id, COALESCE(org_id::text,''), COALESCE(tenant_id::text,''), name, description, dsl_json, version, status, created_at, updated_at
+		 FROM workflows WHERE id = $1`
+	args := []interface{}{id}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND org_id = $2 AND tenant_id = $3`
+		args = append(args, scope.OrgID, scope.TenantID)
+	}
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(
+		&w.ID, &orgID, &tenantID, &w.Name, &w.Description, &w.DSL, &w.Version, &w.Status, &w.CreatedAt, &w.UpdatedAt,
+	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -284,16 +290,28 @@ func (r *Repository) GetWorkflow(ctx context.Context, id string) (*Workflow, err
 func (r *Repository) UpdateWorkflow(ctx context.Context, w *Workflow) error {
 	w.UpdatedAt = time.Now()
 	w.Version++
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE workflows SET name=$1, description=$2, dsl_json=$3, version=$4, status=$5, updated_at=$6
-		 WHERE id=$7 AND ($8::uuid IS NULL OR org_id=$8) AND ($9::uuid IS NULL OR tenant_id=$9)`,
-		w.Name, w.Description, w.DSL, w.Version, w.Status, w.UpdatedAt, w.ID, nullIfEmpty(w.OrgID), nullIfEmpty(w.TenantID),
-	)
+	query := `UPDATE workflows SET name=$1, description=$2, dsl_json=$3, version=$4, status=$5, updated_at=$6
+		 WHERE id=$7`
+	args := []interface{}{w.Name, w.Description, w.DSL, w.Version, w.Status, w.UpdatedAt, w.ID}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND org_id=$8 AND tenant_id=$9`
+		args = append(args, scope.OrgID, scope.TenantID)
+	} else {
+		query += ` AND ($8::uuid IS NULL OR org_id=$8) AND ($9::uuid IS NULL OR tenant_id=$9)`
+		args = append(args, nullIfEmpty(w.OrgID), nullIfEmpty(w.TenantID))
+	}
+	_, err := r.db.ExecContext(ctx, query, args...)
 	return err
 }
 
 func (r *Repository) DeleteWorkflow(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM workflows WHERE id = $1`, id)
+	query := `DELETE FROM workflows WHERE id = $1`
+	args := []interface{}{id}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND org_id = $2 AND tenant_id = $3`
+		args = append(args, scope.OrgID, scope.TenantID)
+	}
+	_, err := r.db.ExecContext(ctx, query, args...)
 	return err
 }
 
@@ -400,11 +418,17 @@ func (r *Repository) CreateRun(ctx context.Context, run *WorkflowRun) error {
 func (r *Repository) GetRun(ctx context.Context, id string) (*WorkflowRun, error) {
 	run := &WorkflowRun{}
 	var orgID, tenantID sql.NullString
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, workflow_id, COALESCE(org_id::text,''), COALESCE(tenant_id::text,''), conversation_id, status, inputs, outputs, error, total_tokens, total_steps, elapsed_ms, started_at, finished_at
-		 FROM workflow_runs WHERE id = $1`, id,
-	).Scan(&run.ID, &run.WorkflowID, &orgID, &tenantID, &run.ConversationID, &run.Status, &run.Inputs, &run.Outputs, &run.Error,
-		&run.TotalTokens, &run.TotalSteps, &run.ElapsedMs, &run.StartedAt, &run.FinishedAt)
+	query := `SELECT id, workflow_id, COALESCE(org_id::text,''), COALESCE(tenant_id::text,''), conversation_id, status, inputs, outputs, error, total_tokens, total_steps, elapsed_ms, started_at, finished_at
+		 FROM workflow_runs WHERE id = $1`
+	args := []interface{}{id}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND org_id = $2 AND tenant_id = $3`
+		args = append(args, scope.OrgID, scope.TenantID)
+	}
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(
+		&run.ID, &run.WorkflowID, &orgID, &tenantID, &run.ConversationID, &run.Status, &run.Inputs, &run.Outputs, &run.Error,
+		&run.TotalTokens, &run.TotalSteps, &run.ElapsedMs, &run.StartedAt, &run.FinishedAt,
+	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -414,11 +438,14 @@ func (r *Repository) GetRun(ctx context.Context, id string) (*WorkflowRun, error
 }
 
 func (r *Repository) UpdateRun(ctx context.Context, run *WorkflowRun) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE workflow_runs SET status=$1, outputs=$2, error=$3, total_tokens=$4, total_steps=$5, elapsed_ms=$6, finished_at=$7, conversation_id=$8
-		 WHERE id=$9`,
-		run.Status, run.Outputs, run.Error, run.TotalTokens, run.TotalSteps, run.ElapsedMs, run.FinishedAt, run.ConversationID, run.ID,
-	)
+	query := `UPDATE workflow_runs SET status=$1, outputs=$2, error=$3, total_tokens=$4, total_steps=$5, elapsed_ms=$6, finished_at=$7, conversation_id=$8
+		 WHERE id=$9`
+	args := []interface{}{run.Status, run.Outputs, run.Error, run.TotalTokens, run.TotalSteps, run.ElapsedMs, run.FinishedAt, run.ConversationID, run.ID}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND org_id = $10 AND tenant_id = $11`
+		args = append(args, scope.OrgID, scope.TenantID)
+	}
+	_, err := r.db.ExecContext(ctx, query, args...)
 	return err
 }
 
@@ -577,9 +604,17 @@ func (r *Repository) BatchCreateNodeExecs(ctx context.Context, records []*NodeEx
 }
 
 func (r *Repository) ListNodeExecsByRunID(ctx context.Context, runID string) ([]*NodeExecutionRecord, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, run_id, node_id, node_type, title, status, outputs, error, metadata, elapsed_ms, started_at
-		 FROM node_executions WHERE run_id = $1 ORDER BY started_at`, runID)
+	query := `SELECT ne.id, ne.run_id, ne.node_id, ne.node_type, ne.title, ne.status, ne.outputs, ne.error, ne.metadata, ne.elapsed_ms, ne.started_at
+		 FROM node_executions ne
+		 JOIN workflow_runs wr ON wr.id = ne.run_id
+		 WHERE ne.run_id = $1`
+	args := []interface{}{runID}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND wr.org_id = $2 AND wr.tenant_id = $3`
+		args = append(args, scope.OrgID, scope.TenantID)
+	}
+	query += ` ORDER BY ne.started_at`
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -685,8 +720,13 @@ func (r *Repository) CreateOrganization(ctx context.Context, org *Organization) 
 
 func (r *Repository) GetOrganization(ctx context.Context, id string) (*Organization, error) {
 	org := &Organization{}
-	err := r.db.QueryRowContext(ctx, `SELECT id, code, name, status, created_at, updated_at FROM organizations WHERE id = $1`, id).
-		Scan(&org.ID, &org.Code, &org.Name, &org.Status, &org.CreatedAt, &org.UpdatedAt)
+	query := `SELECT id, code, name, status, created_at, updated_at FROM organizations WHERE id = $1`
+	args := []interface{}{id}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND id = $2`
+		args = append(args, scope.OrgID)
+	}
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(&org.ID, &org.Code, &org.Name, &org.Status, &org.CreatedAt, &org.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -694,7 +734,14 @@ func (r *Repository) GetOrganization(ctx context.Context, id string) (*Organizat
 }
 
 func (r *Repository) ListOrganizations(ctx context.Context) ([]*Organization, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, code, name, status, created_at, updated_at FROM organizations ORDER BY created_at DESC`)
+	query := `SELECT id, code, name, status, created_at, updated_at FROM organizations`
+	args := []interface{}{}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` WHERE id = $1`
+		args = append(args, scope.OrgID)
+	}
+	query += ` ORDER BY created_at DESC`
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -712,14 +759,24 @@ func (r *Repository) ListOrganizations(ctx context.Context) ([]*Organization, er
 }
 
 func (r *Repository) UpdateOrganization(ctx context.Context, org *Organization) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE organizations SET code=$1, name=$2, status=$3, updated_at=NOW() WHERE id=$4`,
-		org.Code, org.Name, org.Status, org.ID)
+	query := `UPDATE organizations SET code=$1, name=$2, status=$3, updated_at=NOW() WHERE id=$4`
+	args := []interface{}{org.Code, org.Name, org.Status, org.ID}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND id=$5`
+		args = append(args, scope.OrgID)
+	}
+	_, err := r.db.ExecContext(ctx, query, args...)
 	return err
 }
 
 func (r *Repository) DeleteOrganization(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM organizations WHERE id = $1`, id)
+	query := `DELETE FROM organizations WHERE id = $1`
+	args := []interface{}{id}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND id = $2`
+		args = append(args, scope.OrgID)
+	}
+	_, err := r.db.ExecContext(ctx, query, args...)
 	return err
 }
 
@@ -741,8 +798,13 @@ func (r *Repository) CreateTenant(ctx context.Context, tenant *Tenant) error {
 
 func (r *Repository) GetTenant(ctx context.Context, id string) (*Tenant, error) {
 	t := &Tenant{}
-	err := r.db.QueryRowContext(ctx, `SELECT id, org_id, code, name, status, created_at, updated_at FROM tenants WHERE id = $1`, id).
-		Scan(&t.ID, &t.OrgID, &t.Code, &t.Name, &t.Status, &t.CreatedAt, &t.UpdatedAt)
+	query := `SELECT id, org_id, code, name, status, created_at, updated_at FROM tenants WHERE id = $1`
+	args := []interface{}{id}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND org_id = $2 AND id = $3`
+		args = append(args, scope.OrgID, scope.TenantID)
+	}
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(&t.ID, &t.OrgID, &t.Code, &t.Name, &t.Status, &t.CreatedAt, &t.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -752,8 +814,13 @@ func (r *Repository) GetTenant(ctx context.Context, id string) (*Tenant, error) 
 func (r *Repository) ListTenants(ctx context.Context, orgID string) ([]*Tenant, error) {
 	query := `SELECT id, org_id, code, name, status, created_at, updated_at FROM tenants WHERE 1=1`
 	var args []interface{}
-	if orgID != "" {
-		query += ` AND org_id = $1`
+	argIdx := 1
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += fmt.Sprintf(" AND org_id = $%d AND id = $%d", argIdx, argIdx+1)
+		args = append(args, scope.OrgID, scope.TenantID)
+		argIdx += 2
+	} else if orgID != "" {
+		query += fmt.Sprintf(" AND org_id = $%d", argIdx)
 		args = append(args, orgID)
 	}
 	query += ` ORDER BY created_at DESC`
@@ -776,14 +843,24 @@ func (r *Repository) ListTenants(ctx context.Context, orgID string) ([]*Tenant, 
 }
 
 func (r *Repository) UpdateTenant(ctx context.Context, tenant *Tenant) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE tenants SET code=$1, name=$2, status=$3, updated_at=NOW() WHERE id=$4`,
-		tenant.Code, tenant.Name, tenant.Status, tenant.ID)
+	query := `UPDATE tenants SET code=$1, name=$2, status=$3, updated_at=NOW() WHERE id=$4`
+	args := []interface{}{tenant.Code, tenant.Name, tenant.Status, tenant.ID}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND org_id=$5 AND id=$6`
+		args = append(args, scope.OrgID, scope.TenantID)
+	}
+	_, err := r.db.ExecContext(ctx, query, args...)
 	return err
 }
 
 func (r *Repository) DeleteTenant(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM tenants WHERE id = $1`, id)
+	query := `DELETE FROM tenants WHERE id = $1`
+	args := []interface{}{id}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND org_id = $2 AND id = $3`
+		args = append(args, scope.OrgID, scope.TenantID)
+	}
+	_, err := r.db.ExecContext(ctx, query, args...)
 	return err
 }
 
@@ -842,10 +919,16 @@ func (r *Repository) CreateDataset(ctx context.Context, ds *Dataset) error {
 
 func (r *Repository) GetDataset(ctx context.Context, id string) (*Dataset, error) {
 	ds := &Dataset{}
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, org_id, tenant_id, name, description, status, doc_count, created_at, updated_at
-		 FROM datasets WHERE id = $1`, id).
-		Scan(&ds.ID, &ds.OrgID, &ds.TenantID, &ds.Name, &ds.Description, &ds.Status, &ds.DocCount, &ds.CreatedAt, &ds.UpdatedAt)
+	query := `SELECT id, org_id, tenant_id, name, description, status, doc_count, created_at, updated_at
+		 FROM datasets WHERE id = $1`
+	args := []interface{}{id}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND org_id = $2 AND tenant_id = $3`
+		args = append(args, scope.OrgID, scope.TenantID)
+	}
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(
+		&ds.ID, &ds.OrgID, &ds.TenantID, &ds.Name, &ds.Description, &ds.Status, &ds.DocCount, &ds.CreatedAt, &ds.UpdatedAt,
+	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -856,21 +939,19 @@ func (r *Repository) ListDatasets(ctx context.Context, orgID, tenantID string) (
 	query := `SELECT id, org_id, tenant_id, name, description, status, doc_count, created_at, updated_at FROM datasets WHERE 1=1`
 	var args []interface{}
 	argIdx := 1
-	if orgID != "" {
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += fmt.Sprintf(" AND org_id = $%d AND tenant_id = $%d", argIdx, argIdx+1)
+		args = append(args, scope.OrgID, scope.TenantID)
+		argIdx += 2
+	} else if orgID != "" {
 		query += fmt.Sprintf(" AND org_id = $%d", argIdx)
 		args = append(args, orgID)
 		argIdx++
 	}
-	if tenantID != "" {
+	if scope := scopeFromContext(ctx); scope == nil && tenantID != "" {
 		query += fmt.Sprintf(" AND tenant_id = $%d", argIdx)
 		args = append(args, tenantID)
 		argIdx++
-	}
-	// 也检查 context scope
-	if scope := scopeFromContext(ctx); scope != nil && orgID == "" {
-		query += fmt.Sprintf(" AND org_id = $%d AND tenant_id = $%d", argIdx, argIdx+1)
-		args = append(args, scope.OrgID, scope.TenantID)
-		argIdx += 2
 	}
 	query += " ORDER BY created_at DESC"
 
@@ -893,14 +974,24 @@ func (r *Repository) ListDatasets(ctx context.Context, orgID, tenantID string) (
 
 func (r *Repository) UpdateDataset(ctx context.Context, ds *Dataset) error {
 	ds.UpdatedAt = time.Now()
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE datasets SET name=$1, description=$2, status=$3, doc_count=$4, updated_at=$5 WHERE id=$6`,
-		ds.Name, ds.Description, ds.Status, ds.DocCount, ds.UpdatedAt, ds.ID)
+	query := `UPDATE datasets SET name=$1, description=$2, status=$3, doc_count=$4, updated_at=$5 WHERE id=$6`
+	args := []interface{}{ds.Name, ds.Description, ds.Status, ds.DocCount, ds.UpdatedAt, ds.ID}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND org_id = $7 AND tenant_id = $8`
+		args = append(args, scope.OrgID, scope.TenantID)
+	}
+	_, err := r.db.ExecContext(ctx, query, args...)
 	return err
 }
 
 func (r *Repository) DeleteDataset(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM datasets WHERE id = $1`, id)
+	query := `DELETE FROM datasets WHERE id = $1`
+	args := []interface{}{id}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND org_id = $2 AND tenant_id = $3`
+		args = append(args, scope.OrgID, scope.TenantID)
+	}
+	_, err := r.db.ExecContext(ctx, query, args...)
 	return err
 }
 
@@ -925,10 +1016,16 @@ func (r *Repository) CreateDocument(ctx context.Context, doc *Document) error {
 
 func (r *Repository) GetDocument(ctx context.Context, id string) (*Document, error) {
 	doc := &Document{}
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, dataset_id, org_id, tenant_id, name, source, chunk_count, status, created_at, updated_at
-		 FROM documents WHERE id = $1`, id).
-		Scan(&doc.ID, &doc.DatasetID, &doc.OrgID, &doc.TenantID, &doc.Name, &doc.Source, &doc.ChunkCount, &doc.Status, &doc.CreatedAt, &doc.UpdatedAt)
+	query := `SELECT id, dataset_id, org_id, tenant_id, name, source, chunk_count, status, created_at, updated_at
+		 FROM documents WHERE id = $1`
+	args := []interface{}{id}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND org_id = $2 AND tenant_id = $3`
+		args = append(args, scope.OrgID, scope.TenantID)
+	}
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(
+		&doc.ID, &doc.DatasetID, &doc.OrgID, &doc.TenantID, &doc.Name, &doc.Source, &doc.ChunkCount, &doc.Status, &doc.CreatedAt, &doc.UpdatedAt,
+	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -936,9 +1033,15 @@ func (r *Repository) GetDocument(ctx context.Context, id string) (*Document, err
 }
 
 func (r *Repository) ListDocuments(ctx context.Context, datasetID string) ([]*Document, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, dataset_id, org_id, tenant_id, name, source, chunk_count, status, created_at, updated_at
-		 FROM documents WHERE dataset_id = $1 ORDER BY created_at DESC`, datasetID)
+	query := `SELECT id, dataset_id, org_id, tenant_id, name, source, chunk_count, status, created_at, updated_at
+		 FROM documents WHERE dataset_id = $1`
+	args := []interface{}{datasetID}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND org_id = $2 AND tenant_id = $3`
+		args = append(args, scope.OrgID, scope.TenantID)
+	}
+	query += ` ORDER BY created_at DESC`
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -957,14 +1060,24 @@ func (r *Repository) ListDocuments(ctx context.Context, datasetID string) ([]*Do
 
 func (r *Repository) UpdateDocument(ctx context.Context, doc *Document) error {
 	doc.UpdatedAt = time.Now()
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE documents SET name=$1, source=$2, chunk_count=$3, status=$4, updated_at=$5 WHERE id=$6`,
-		doc.Name, doc.Source, doc.ChunkCount, doc.Status, doc.UpdatedAt, doc.ID)
+	query := `UPDATE documents SET name=$1, source=$2, chunk_count=$3, status=$4, updated_at=$5 WHERE id=$6`
+	args := []interface{}{doc.Name, doc.Source, doc.ChunkCount, doc.Status, doc.UpdatedAt, doc.ID}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND org_id = $7 AND tenant_id = $8`
+		args = append(args, scope.OrgID, scope.TenantID)
+	}
+	_, err := r.db.ExecContext(ctx, query, args...)
 	return err
 }
 
 func (r *Repository) DeleteDocument(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM documents WHERE id = $1`, id)
+	query := `DELETE FROM documents WHERE id = $1`
+	args := []interface{}{id}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND org_id = $2 AND tenant_id = $3`
+		args = append(args, scope.OrgID, scope.TenantID)
+	}
+	_, err := r.db.ExecContext(ctx, query, args...)
 	return err
 }
 

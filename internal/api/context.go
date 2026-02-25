@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"fmt"
+
+	"flowweave/internal/domain/workflow/port"
 )
 
 // Scope 租户作用域（注入到 context）
@@ -36,4 +38,13 @@ func MustScopeFrom(ctx context.Context) *Scope {
 		panic("scope missing from context: middleware not applied?")
 	}
 	return scope
+}
+
+// RepoContextFrom 将 API scope 注入为 repository scope，供存储层做租户过滤
+func RepoContextFrom(ctx context.Context) context.Context {
+	scope, err := ScopeFrom(ctx)
+	if err != nil || scope == nil {
+		return ctx
+	}
+	return port.WithRepoScope(ctx, scope.OrgID, scope.TenantID)
 }

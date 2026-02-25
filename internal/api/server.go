@@ -84,12 +84,17 @@ func (s *Server) Start() error {
 
 	// JWT 鉴权中间件（仅当 JWT_SECRET 配置时启用）
 	// 使用 Group 包裹需要鉴权的路由，避免 chi 的中间件顺序限制
+	orgHandler := NewOrganizationHandler(s.repo)
+	tenantHandler := NewTenantHandler(s.repo)
 	if s.config.JWTSecret != "" {
 		jwtCfg := &JWTConfig{
 			Secret: s.config.JWTSecret,
 			Issuer: s.config.JWTIssuer,
 		}
 		applog.Info("🔐 JWT authentication enabled")
+		// 组织/租户创建接口允许免 JWT，便于初始化注册
+		orgHandler.RegisterPublicRoutes(r)
+		tenantHandler.RegisterPublicRoutes(r)
 
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware(jwtCfg))
@@ -99,10 +104,8 @@ func (s *Server) Start() error {
 			handler.RegisterRoutes(r)
 
 			// 注册租户和组织 API
-			orgHandler := NewOrganizationHandler(s.repo)
-			orgHandler.RegisterRoutes(r)
-			tenantHandler := NewTenantHandler(s.repo)
-			tenantHandler.RegisterRoutes(r)
+			orgHandler.RegisterProtectedRoutes(r)
+			tenantHandler.RegisterProtectedRoutes(r)
 
 			// 注册 RAG API（仅在配置时启用）
 			if s.retriever != nil || s.indexer != nil {
@@ -119,9 +122,7 @@ func (s *Server) Start() error {
 		handler.RegisterRoutes(r)
 
 		// 注册租户和组织 API
-		orgHandler := NewOrganizationHandler(s.repo)
 		orgHandler.RegisterRoutes(r)
-		tenantHandler := NewTenantHandler(s.repo)
 		tenantHandler.RegisterRoutes(r)
 
 		// 注册 RAG API（仅在配置时启用）
@@ -161,23 +162,34 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	// 测试模式：如果配置了 JWT 也加上
+	orgHandler := NewOrganizationHandler(s.repo)
+	tenantHandler := NewTenantHandler(s.repo)
 	if s.config.JWTSecret != "" {
 		jwtCfg := &JWTConfig{
 			Secret: s.config.JWTSecret,
 			Issuer: s.config.JWTIssuer,
 		}
-		r.Use(authMiddleware(jwtCfg))
+		// 测试模式与正式模式保持一致：仅创建组织/租户免 JWT
+		orgHandler.RegisterPublicRoutes(r)
+		tenantHandler.RegisterPublicRoutes(r)
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware(jwtCfg))
+			handler := NewWorkflowHandler(s.repo, s.runner, s.config.RunTimeout)
+			handler.RegisterRoutes(r)
+			orgHandler.RegisterProtectedRoutes(r)
+			tenantHandler.RegisterProtectedRoutes(r)
+			if s.retriever != nil || s.indexer != nil {
+				ragHandler := NewRAGHandler(s.repo, s.retriever, s.indexer, s.ragMaxMB)
+				ragHandler.RegisterRoutes(r)
+			}
+		})
+		return r
 	}
 
 	handler := NewWorkflowHandler(s.repo, s.runner, s.config.RunTimeout)
 	handler.RegisterRoutes(r)
-
-	orgHandler := NewOrganizationHandler(s.repo)
 	orgHandler.RegisterRoutes(r)
-	tenantHandler := NewTenantHandler(s.repo)
 	tenantHandler.RegisterRoutes(r)
-
 	if s.retriever != nil || s.indexer != nil {
 		ragHandler := NewRAGHandler(s.repo, s.retriever, s.indexer, s.ragMaxMB)
 		ragHandler.RegisterRoutes(r)

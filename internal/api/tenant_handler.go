@@ -19,8 +19,18 @@ func NewOrganizationHandler(repo port.Repository) *OrganizationHandler {
 }
 
 func (h *OrganizationHandler) RegisterRoutes(r chi.Router) {
+	h.RegisterPublicRoutes(r)
+	h.RegisterProtectedRoutes(r)
+}
+
+// RegisterPublicRoutes 注册无需鉴权的组织路由（注册/初始化场景）
+func (h *OrganizationHandler) RegisterPublicRoutes(r chi.Router) {
+	r.Post("/organizations/", h.CreateOrganization)
+}
+
+// RegisterProtectedRoutes 注册需要鉴权的组织路由
+func (h *OrganizationHandler) RegisterProtectedRoutes(r chi.Router) {
 	r.Route("/organizations", func(r chi.Router) {
-		r.Post("/", h.CreateOrganization)
 		r.Get("/", h.ListOrganizations)
 		r.Get("/{id}", h.GetOrganization)
 		r.Put("/{id}", h.UpdateOrganization)
@@ -29,6 +39,8 @@ func (h *OrganizationHandler) RegisterRoutes(r chi.Router) {
 }
 
 func (h *OrganizationHandler) CreateOrganization(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
+
 	var org port.Organization
 	if err := json.NewDecoder(r.Body).Decode(&org); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -39,7 +51,7 @@ func (h *OrganizationHandler) CreateOrganization(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if err := h.repo.CreateOrganization(r.Context(), &org); err != nil {
+	if err := h.repo.CreateOrganization(ctx, &org); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create organization")
 		return
 	}
@@ -47,8 +59,9 @@ func (h *OrganizationHandler) CreateOrganization(w http.ResponseWriter, r *http.
 }
 
 func (h *OrganizationHandler) GetOrganization(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
 	id := chi.URLParam(r, "id")
-	org, err := h.repo.GetOrganization(r.Context(), id)
+	org, err := h.repo.GetOrganization(ctx, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get organization")
 		return
@@ -61,7 +74,8 @@ func (h *OrganizationHandler) GetOrganization(w http.ResponseWriter, r *http.Req
 }
 
 func (h *OrganizationHandler) ListOrganizations(w http.ResponseWriter, r *http.Request) {
-	orgs, err := h.repo.ListOrganizations(r.Context())
+	ctx := RepoContextFrom(r.Context())
+	orgs, err := h.repo.ListOrganizations(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list organizations")
 		return
@@ -70,6 +84,7 @@ func (h *OrganizationHandler) ListOrganizations(w http.ResponseWriter, r *http.R
 }
 
 func (h *OrganizationHandler) UpdateOrganization(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
 	id := chi.URLParam(r, "id")
 	var org port.Organization
 	if err := json.NewDecoder(r.Body).Decode(&org); err != nil {
@@ -82,7 +97,17 @@ func (h *OrganizationHandler) UpdateOrganization(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if err := h.repo.UpdateOrganization(r.Context(), &org); err != nil {
+	existing, err := h.repo.GetOrganization(ctx, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get organization")
+		return
+	}
+	if existing == nil {
+		writeError(w, http.StatusNotFound, "organization not found")
+		return
+	}
+
+	if err := h.repo.UpdateOrganization(ctx, &org); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update organization")
 		return
 	}
@@ -90,8 +115,18 @@ func (h *OrganizationHandler) UpdateOrganization(w http.ResponseWriter, r *http.
 }
 
 func (h *OrganizationHandler) DeleteOrganization(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
 	id := chi.URLParam(r, "id")
-	if err := h.repo.DeleteOrganization(r.Context(), id); err != nil {
+	existing, err := h.repo.GetOrganization(ctx, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get organization")
+		return
+	}
+	if existing == nil {
+		writeError(w, http.StatusNotFound, "organization not found")
+		return
+	}
+	if err := h.repo.DeleteOrganization(ctx, id); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete organization")
 		return
 	}
@@ -108,8 +143,18 @@ func NewTenantHandler(repo port.Repository) *TenantHandler {
 }
 
 func (h *TenantHandler) RegisterRoutes(r chi.Router) {
+	h.RegisterPublicRoutes(r)
+	h.RegisterProtectedRoutes(r)
+}
+
+// RegisterPublicRoutes 注册无需鉴权的租户路由（注册/初始化场景）
+func (h *TenantHandler) RegisterPublicRoutes(r chi.Router) {
+	r.Post("/tenants/", h.CreateTenant)
+}
+
+// RegisterProtectedRoutes 注册需要鉴权的租户路由
+func (h *TenantHandler) RegisterProtectedRoutes(r chi.Router) {
 	r.Route("/tenants", func(r chi.Router) {
-		r.Post("/", h.CreateTenant)
 		r.Get("/", h.ListTenants)
 		r.Get("/{id}", h.GetTenant)
 		r.Put("/{id}", h.UpdateTenant)
@@ -118,6 +163,8 @@ func (h *TenantHandler) RegisterRoutes(r chi.Router) {
 }
 
 func (h *TenantHandler) CreateTenant(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
+
 	var tenant port.Tenant
 	if err := json.NewDecoder(r.Body).Decode(&tenant); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -128,7 +175,7 @@ func (h *TenantHandler) CreateTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.repo.CreateTenant(r.Context(), &tenant); err != nil {
+	if err := h.repo.CreateTenant(ctx, &tenant); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create tenant")
 		return
 	}
@@ -136,8 +183,9 @@ func (h *TenantHandler) CreateTenant(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TenantHandler) GetTenant(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
 	id := chi.URLParam(r, "id")
-	tenant, err := h.repo.GetTenant(r.Context(), id)
+	tenant, err := h.repo.GetTenant(ctx, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get tenant")
 		return
@@ -150,8 +198,9 @@ func (h *TenantHandler) GetTenant(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TenantHandler) ListTenants(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
 	orgID := r.URL.Query().Get("org_id")
-	tenants, err := h.repo.ListTenants(r.Context(), orgID)
+	tenants, err := h.repo.ListTenants(ctx, orgID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list tenants")
 		return
@@ -160,6 +209,7 @@ func (h *TenantHandler) ListTenants(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TenantHandler) UpdateTenant(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
 	id := chi.URLParam(r, "id")
 	var tenant port.Tenant
 	if err := json.NewDecoder(r.Body).Decode(&tenant); err != nil {
@@ -172,7 +222,17 @@ func (h *TenantHandler) UpdateTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.repo.UpdateTenant(r.Context(), &tenant); err != nil {
+	existing, err := h.repo.GetTenant(ctx, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get tenant")
+		return
+	}
+	if existing == nil {
+		writeError(w, http.StatusNotFound, "tenant not found")
+		return
+	}
+
+	if err := h.repo.UpdateTenant(ctx, &tenant); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update tenant")
 		return
 	}
@@ -180,8 +240,18 @@ func (h *TenantHandler) UpdateTenant(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TenantHandler) DeleteTenant(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
 	id := chi.URLParam(r, "id")
-	if err := h.repo.DeleteTenant(r.Context(), id); err != nil {
+	existing, err := h.repo.GetTenant(ctx, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get tenant")
+		return
+	}
+	if existing == nil {
+		writeError(w, http.StatusNotFound, "tenant not found")
+		return
+	}
+	if err := h.repo.DeleteTenant(ctx, id); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete tenant")
 		return
 	}

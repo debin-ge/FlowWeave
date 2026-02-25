@@ -100,6 +100,8 @@ func (h *RAGHandler) Search(w http.ResponseWriter, r *http.Request) {
 // --- 知识库 CRUD ---
 
 func (h *RAGHandler) CreateDataset(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
+
 	var ds port.Dataset
 	if err := json.NewDecoder(r.Body).Decode(&ds); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -116,7 +118,7 @@ func (h *RAGHandler) CreateDataset(w http.ResponseWriter, r *http.Request) {
 		ds.TenantID = scope.TenantID
 	}
 
-	if err := h.repo.CreateDataset(r.Context(), &ds); err != nil {
+	if err := h.repo.CreateDataset(ctx, &ds); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create dataset")
 		return
 	}
@@ -124,8 +126,9 @@ func (h *RAGHandler) CreateDataset(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *RAGHandler) GetDataset(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
 	id := chi.URLParam(r, "id")
-	ds, err := h.repo.GetDataset(r.Context(), id)
+	ds, err := h.repo.GetDataset(ctx, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get dataset")
 		return
@@ -138,6 +141,7 @@ func (h *RAGHandler) GetDataset(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *RAGHandler) ListDatasets(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
 	orgID := ""
 	tenantID := ""
 	if scope, err := ScopeFrom(r.Context()); err == nil {
@@ -145,7 +149,7 @@ func (h *RAGHandler) ListDatasets(w http.ResponseWriter, r *http.Request) {
 		tenantID = scope.TenantID
 	}
 
-	datasets, err := h.repo.ListDatasets(r.Context(), orgID, tenantID)
+	datasets, err := h.repo.ListDatasets(ctx, orgID, tenantID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list datasets")
 		return
@@ -154,14 +158,27 @@ func (h *RAGHandler) ListDatasets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *RAGHandler) UpdateDataset(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
 	id := chi.URLParam(r, "id")
 	var ds port.Dataset
 	if err := json.NewDecoder(r.Body).Decode(&ds); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	existing, err := h.repo.GetDataset(ctx, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get dataset")
+		return
+	}
+	if existing == nil {
+		writeError(w, http.StatusNotFound, "dataset not found")
+		return
+	}
 	ds.ID = id
-	if err := h.repo.UpdateDataset(r.Context(), &ds); err != nil {
+	ds.OrgID = existing.OrgID
+	ds.TenantID = existing.TenantID
+	ds.DocCount = existing.DocCount
+	if err := h.repo.UpdateDataset(ctx, &ds); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update dataset")
 		return
 	}
@@ -169,8 +186,18 @@ func (h *RAGHandler) UpdateDataset(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *RAGHandler) DeleteDataset(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
 	id := chi.URLParam(r, "id")
-	if err := h.repo.DeleteDataset(r.Context(), id); err != nil {
+	existing, err := h.repo.GetDataset(ctx, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get dataset")
+		return
+	}
+	if existing == nil {
+		writeError(w, http.StatusNotFound, "dataset not found")
+		return
+	}
+	if err := h.repo.DeleteDataset(ctx, id); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete dataset")
 		return
 	}
@@ -187,6 +214,7 @@ type indexDocumentRequest struct {
 }
 
 func (h *RAGHandler) IndexDocument(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
 	if h.indexer == nil {
 		writeError(w, http.StatusServiceUnavailable, "RAG indexer not configured")
 		return
@@ -245,15 +273,15 @@ func (h *RAGHandler) IndexDocument(w http.ResponseWriter, r *http.Request) {
 		ChunkCount: result.ChunkCount,
 		Status:     "completed",
 	}
-	if err := h.repo.CreateDocument(r.Context(), doc); err != nil {
+	if err := h.repo.CreateDocument(ctx, doc); err != nil {
 		applog.Warn("[RAG] Failed to save document metadata", "error", err)
 	}
 
 	// 3. 更新 dataset doc_count
-	ds, _ := h.repo.GetDataset(r.Context(), datasetID)
+	ds, _ := h.repo.GetDataset(ctx, datasetID)
 	if ds != nil {
 		ds.DocCount++
-		_ = h.repo.UpdateDataset(r.Context(), ds)
+		_ = h.repo.UpdateDataset(ctx, ds)
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
@@ -264,8 +292,9 @@ func (h *RAGHandler) IndexDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *RAGHandler) ListDocuments(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
 	datasetID := chi.URLParam(r, "datasetID")
-	docs, err := h.repo.ListDocuments(r.Context(), datasetID)
+	docs, err := h.repo.ListDocuments(ctx, datasetID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list documents")
 		return
@@ -274,8 +303,9 @@ func (h *RAGHandler) ListDocuments(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *RAGHandler) GetDocument(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
 	docID := chi.URLParam(r, "docID")
-	doc, err := h.repo.GetDocument(r.Context(), docID)
+	doc, err := h.repo.GetDocument(ctx, docID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get document")
 		return
@@ -288,8 +318,18 @@ func (h *RAGHandler) GetDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *RAGHandler) DeleteDocument(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
 	docID := chi.URLParam(r, "docID")
-	if err := h.repo.DeleteDocument(r.Context(), docID); err != nil {
+	existing, err := h.repo.GetDocument(ctx, docID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get document")
+		return
+	}
+	if existing == nil {
+		writeError(w, http.StatusNotFound, "document not found")
+		return
+	}
+	if err := h.repo.DeleteDocument(ctx, docID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete document")
 		return
 	}
@@ -374,6 +414,7 @@ func (h *RAGHandler) UploadDocument(w http.ResponseWriter, r *http.Request) {
 
 // IndexQAPairs QA 对批量入库
 func (h *RAGHandler) IndexQAPairs(w http.ResponseWriter, r *http.Request) {
+	ctx := RepoContextFrom(r.Context())
 	if h.indexer == nil {
 		writeError(w, http.StatusServiceUnavailable, "RAG indexer not configured")
 		return
@@ -432,7 +473,7 @@ func (h *RAGHandler) IndexQAPairs(w http.ResponseWriter, r *http.Request) {
 		ChunkCount: result.ChunkCount,
 		Status:     "completed",
 	}
-	if err := h.repo.CreateDocument(r.Context(), doc); err != nil {
+	if err := h.repo.CreateDocument(ctx, doc); err != nil {
 		applog.Warn("[RAG] Failed to save QA document metadata", "error", err)
 	}
 
@@ -446,6 +487,7 @@ func (h *RAGHandler) IndexQAPairs(w http.ResponseWriter, r *http.Request) {
 
 // indexAndRespond 通用入库+响应逻辑
 func (h *RAGHandler) indexAndRespond(w http.ResponseWriter, r *http.Request, datasetID, title, content, source string, metadata map[string]string) {
+	ctx := RepoContextFrom(r.Context())
 	orgID, tenantID := "", ""
 	if scope, err := ScopeFrom(r.Context()); err == nil {
 		orgID = scope.OrgID
@@ -481,14 +523,14 @@ func (h *RAGHandler) indexAndRespond(w http.ResponseWriter, r *http.Request, dat
 		ChunkCount: result.ChunkCount,
 		Status:     "completed",
 	}
-	if err := h.repo.CreateDocument(r.Context(), doc); err != nil {
+	if err := h.repo.CreateDocument(ctx, doc); err != nil {
 		applog.Warn("[RAG] Failed to save document metadata", "error", err)
 	}
 
-	ds, _ := h.repo.GetDataset(r.Context(), datasetID)
+	ds, _ := h.repo.GetDataset(ctx, datasetID)
 	if ds != nil {
 		ds.DocCount++
-		_ = h.repo.UpdateDataset(r.Context(), ds)
+		_ = h.repo.UpdateDataset(ctx, ds)
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
