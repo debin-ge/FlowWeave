@@ -44,7 +44,12 @@ services:
     restart: unless-stopped
     environment:
       discovery.type: ${OPENSEARCH_DISCOVERY_TYPE:-single-node}
-      plugins.security.disabled: "${OPENSEARCH_SECURITY_DISABLED:-true}"
+      # OpenSearch 2.12+：优先使用 DISABLE_SECURITY_PLUGIN，避免 plugins.security.disabled 兼容问题
+      DISABLE_SECURITY_PLUGIN: "${OPENSEARCH_SECURITY_DISABLED:-true}"
+      # 当关闭安全插件时，同时跳过 demo security 初始化脚本
+      DISABLE_INSTALL_DEMO_CONFIG: "${OPENSEARCH_DISABLE_DEMO_CONFIG:-true}"
+      # 仅在启用安全插件时需要（OPENSEARCH_SECURITY_DISABLED=false）
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: "${OPENSEARCH_INITIAL_ADMIN_PASSWORD:-}"
       bootstrap.memory_lock: "true"
       OPENSEARCH_JAVA_OPTS: ${OPENSEARCH_JAVA_OPTS:--Xms512m -Xmx512m}
     ports:

@@ -71,9 +71,16 @@ cp .env.example .env
 - 对外端口：`9200`
 - 管理端口：`9600`
 - 单节点模式：`discovery.type=single-node`
-- 默认关闭 security plugin（便于本地和测试环境）
+- 默认关闭 security plugin（便于本地和测试环境，2.12+ 使用 `DISABLE_SECURITY_PLUGIN` 方式）
 - 构建时安装 IK 中文分词插件（来自 `OPENSEARCH_IK_PLUGIN_URL`）
 - 数据卷：`opensearch-data`
+
+OpenSearch 2.12+ 注意事项：
+
+- 若启用安全插件（`OPENSEARCH_SECURITY_DISABLED=false`），必须设置强密码：`OPENSEARCH_INITIAL_ADMIN_PASSWORD`
+- 若保持本地开发模式（禁用安全插件），建议：
+  - `OPENSEARCH_SECURITY_DISABLED=true`
+  - `OPENSEARCH_DISABLE_DEMO_CONFIG=true`
 
 ### 4.4 FlowWeave App
 

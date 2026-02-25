@@ -20,6 +20,14 @@ cp .env.example .env
 - `OPENAI_API_KEY`（要运行 LLM 节点必须配置）
 - `OPENSEARCH_IK_PLUGIN_URL`（用于安装 OpenSearch 中文 IK 插件）
 
+OpenSearch 2.12+ 额外说明：
+
+- 本地开发（默认）可保持：
+  - `OPENSEARCH_SECURITY_DISABLED=true`
+  - `OPENSEARCH_DISABLE_DEMO_CONFIG=true`
+- 若你要启用安全插件（`OPENSEARCH_SECURITY_DISABLED=false`），必须设置：
+  - `OPENSEARCH_INITIAL_ADMIN_PASSWORD`（强密码）
+
 常用建议项：
 
 - `JWT_SECRET`（生产建议开启）
