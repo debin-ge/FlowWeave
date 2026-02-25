@@ -2,19 +2,14 @@
 
 ## 1. 环境准备
 
-运行 FlowWeave 至少需要：
+默认使用 Docker Compose 运行，需准备：
 
-- Go 1.25+
-- PostgreSQL
-- Redis
-
-可选组件：
-
-- OpenSearch（需要 RAG 时）
+- Docker
+- Docker Compose（`docker compose`）
 
 ## 2. 初始化配置
 
-复制环境变量模板：
+复制 Docker 环境变量模板：
 
 ```bash
 cp .env.example .env
@@ -22,38 +17,47 @@ cp .env.example .env
 
 最小必填项：
 
-- `DATABASE_URL`
-- `REDIS_URL`
+- `OPENAI_API_KEY`（要运行 LLM 节点必须配置）
+- `OPENSEARCH_IK_PLUGIN_URL`（用于安装 OpenSearch 中文 IK 插件）
 
 常用建议项：
 
-- `OPENAI_API_KEY`（要运行 LLM 节点必须配置）
 - `JWT_SECRET`（生产建议开启）
-
-## 3. 初始化数据库
-
-执行：
-
-```bash
-psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
-psql "$DATABASE_URL" -f migrations/postgres/schema.sql
-```
 
 说明：
 
-- 应用启动时还会执行 `Ensure*` 逻辑补齐历史字段/索引
-- 但首次部署仍建议先跑 `schema.sql`
+- 通过 Compose 启动时，PostgreSQL 会自动执行初始化脚本
+- `migrations/postgres/schema.sql` 会在数据库首次启动时自动导入
+- OpenSearch 镜像构建阶段会安装 IK 插件，用于 `ik_max_word` 中文分词
 
-## 4. 启动服务
+## 3. 启动全套服务
 
 ```bash
-go run ./cmd/server
+docker compose up -d --build
 ```
 
-健康检查：
+查看启动日志：
+
+```bash
+docker compose logs -f flowweave
+```
+
+## 4. 健康检查与停止服务
 
 ```bash
 curl http://localhost:8080/health
+```
+
+停止并清理容器（保留数据卷）：
+
+```bash
+docker compose down
+```
+
+连同数据卷一并清理：
+
+```bash
+docker compose down -v
 ```
 
 ## 5. 快速创建并运行工作流

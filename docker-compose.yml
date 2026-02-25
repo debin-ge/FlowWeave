@@ -1,0 +1,91 @@
+name: flowweave
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: flowweave-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: flowweave
+      POSTGRES_USER: flowweave
+      POSTGRES_PASSWORD: flowweave
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./migrations/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowweave -d flowweave"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: flowweave-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  opensearch:
+    build:
+      context: .
+      dockerfile: docker/opensearch/Dockerfile
+      args:
+        OPENSEARCH_VERSION: ${OPENSEARCH_VERSION:-2.19.4}
+        OPENSEARCH_IK_PLUGIN_URL: ${OPENSEARCH_IK_PLUGIN_URL:-}
+    image: flowweave-opensearch:${OPENSEARCH_VERSION:-2.19.4}-ik
+    container_name: flowweave-opensearch
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      plugins.security.disabled: "true"
+      bootstrap.memory_lock: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+  flowweave:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: flowweave-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      opensearch:
+        condition: service_started
+    env_file:
+      - ./.env
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8080/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  pg-data:
+  redis-data:
+  opensearch-data:

@@ -66,9 +66,7 @@ FlowWeave 通过“统一运行时”方式，把这些问题收敛为标准能�
 
 ```bash
 cp .env.example .env
-psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
-psql "$DATABASE_URL" -f migrations/postgres/schema.sql
-go run ./cmd/server
+docker compose up -d --build
 curl http://localhost:8080/health
 ```
 

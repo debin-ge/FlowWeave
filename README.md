@@ -78,16 +78,26 @@ Storage Layer
 
 ## 快速体验（简版）
 
-只保留最小步骤：
+默认使用 Docker Compose 一键拉起 `FlowWeave + PostgreSQL + Redis + OpenSearch`。
+
+1. 准备应用环境变量：
 
 ```bash
 cp .env.example .env
-psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
-psql "$DATABASE_URL" -f migrations/postgres/schema.sql
-go run ./cmd/server
 ```
 
-服务启动后可先验证：
+2. 在 `.env` 中至少设置：
+- `OPENAI_API_KEY`
+- `JWT_SECRET`（建议）
+- `OPENSEARCH_IK_PLUGIN_URL`（中文分词插件下载地址）
+
+3. 启动全套服务：
+
+```bash
+docker compose up -d --build
+```
+
+4. 验证服务：
 
 ```bash
 curl http://localhost:8080/health
@@ -106,4 +116,6 @@ curl http://localhost:8080/health
 
 - 未配置 `JWT_SECRET` 时，服务以开发兼容模式运行（不强制鉴权）
 - 未配置或无法连接 OpenSearch 时，RAG 功能自动降级为不可用，不影响核心工作流能力
-- 完整配置项请查看 [`.env.example`](.env.example)
+- 为支持中文检索，OpenSearch 容器构建时会安装 IK 插件（需配置 `OPENSEARCH_IK_PLUGIN_URL`）
+- Compose 默认会自动执行 `migrations/postgres/` 下的 PostgreSQL 初始化脚本
+- 配置模板请查看 [`.env.example`](.env.example)
