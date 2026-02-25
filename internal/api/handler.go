@@ -1,9 +1,9 @@
 package api
 
 import (
-	applog "flowweave/internal/platform/log"
 	"context"
 	"encoding/json"
+	applog "flowweave/internal/platform/log"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -20,16 +20,20 @@ import (
 
 // WorkflowHandler 工作流 API 处理器
 type WorkflowHandler struct {
-	repo   port.Repository
-	runner *workflow.WorkflowRunner
+	repo       port.Repository
+	runner     *workflow.WorkflowRunner
+	runTimeout time.Duration
 }
 
 // NewWorkflowHandler 创建处理器
-func NewWorkflowHandler(repo port.Repository, runner *workflow.WorkflowRunner) *WorkflowHandler {
+func NewWorkflowHandler(repo port.Repository, runner *workflow.WorkflowRunner, runTimeout time.Duration) *WorkflowHandler {
 	if runner == nil {
 		runner = workflow.NewWorkflowRunner(engine.DefaultConfig(), nil)
 	}
-	return &WorkflowHandler{repo: repo, runner: runner}
+	if runTimeout <= 0 {
+		runTimeout = 5 * time.Minute
+	}
+	return &WorkflowHandler{repo: repo, runner: runner, runTimeout: runTimeout}
 }
 
 // RegisterRoutes 注册路由
@@ -278,7 +282,7 @@ func (h *WorkflowHandler) RunWorkflow(w http.ResponseWriter, r *http.Request) {
 
 	// 5. 同步执行
 	startTime := time.Now()
-	execCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	execCtx, cancel := context.WithTimeout(ctx, h.runTimeout)
 	defer cancel()
 
 	opts := &workflow.RunOptions{
@@ -420,7 +424,7 @@ func (h *WorkflowHandler) RunWorkflowStream(w http.ResponseWriter, r *http.Reque
 
 	// 6. 流式执行
 	startTime := time.Now()
-	execCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	execCtx, cancel := context.WithTimeout(ctx, h.runTimeout)
 	defer cancel()
 
 	streamOpts := &workflow.RunOptions{

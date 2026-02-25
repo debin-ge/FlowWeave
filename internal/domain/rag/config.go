@@ -9,10 +9,12 @@ import (
 // Config RAG 模块配置
 type Config struct {
 	// OpenSearch 连接
-	OpenSearchURL      string `json:"opensearch_url"`
-	OpenSearchUsername string `json:"opensearch_username"`
-	OpenSearchPassword string `json:"opensearch_password"`
-	IndexPrefix        string `json:"index_prefix"`
+	OpenSearchURL                string `json:"opensearch_url"`
+	OpenSearchUsername           string `json:"opensearch_username"`
+	OpenSearchPassword           string `json:"opensearch_password"`
+	OpenSearchInsecureSkipVerify bool   `json:"opensearch_insecure_skip_verify"`
+	OpenSearchHTTPTimeoutSeconds int    `json:"opensearch_http_timeout_seconds"`
+	IndexPrefix                  string `json:"index_prefix"`
 
 	// 检索配置
 	DefaultMode  RetrievalMode `json:"default_mode"`
@@ -20,9 +22,11 @@ type Config struct {
 	DefaultTopK  int           `json:"default_top_k"`
 
 	// Embedding (Phase 2)
-	EmbeddingProvider string `json:"embedding_provider,omitempty"`
-	EmbeddingModel    string `json:"embedding_model,omitempty"`
-	EmbeddingDims     int    `json:"embedding_dims,omitempty"`
+	EmbeddingProvider           string `json:"embedding_provider,omitempty"`
+	EmbeddingModel              string `json:"embedding_model,omitempty"`
+	EmbeddingDims               int    `json:"embedding_dims,omitempty"`
+	EmbeddingHTTPTimeoutSeconds int    `json:"embedding_http_timeout_seconds,omitempty"`
+	EmbeddingBatchSize          int    `json:"embedding_batch_size,omitempty"`
 
 	// Rerank (Phase 2)
 	RerankProvider string `json:"rerank_provider,omitempty"`
@@ -33,23 +37,29 @@ type Config struct {
 	ChunkOverlap int `json:"chunk_overlap"`
 
 	// 缓存配置
-	CacheTTL    int `json:"cache_ttl"`     // 缓存 TTL（秒），0=禁用
-	MaxFileSize int `json:"max_file_size"` // 最大文件大小（MB）
+	CacheTTL                 int `json:"cache_ttl"`                   // 缓存 TTL（秒），0=禁用
+	CacheWriteTimeoutSeconds int `json:"cache_write_timeout_seconds"` // 缓存异步写超时（秒）
+	MaxFileSize              int `json:"max_file_size"`               // 最大文件大小（MB）
 }
 
 // DefaultConfig 默认配置
 func DefaultConfig() *Config {
 	return &Config{
-		OpenSearchURL: "https://localhost:9200",
-		IndexPrefix:   "rag",
-		DefaultMode:   RetrievalModeBM25,
-		EnableRerank:  false,
-		DefaultTopK:   5,
-		EmbeddingDims: 768,
-		ChunkSize:     512,
-		ChunkOverlap:  128,
-		CacheTTL:      300, // 5分钟
-		MaxFileSize:   50,  // 50MB
+		OpenSearchURL:                "https://localhost:9200",
+		OpenSearchInsecureSkipVerify: true,
+		OpenSearchHTTPTimeoutSeconds: 30,
+		IndexPrefix:                  "rag",
+		DefaultMode:                  RetrievalModeBM25,
+		EnableRerank:                 false,
+		DefaultTopK:                  5,
+		EmbeddingDims:                768,
+		EmbeddingHTTPTimeoutSeconds:  60,
+		EmbeddingBatchSize:           64,
+		ChunkSize:                    512,
+		ChunkOverlap:                 128,
+		CacheTTL:                     300, // 5分钟
+		CacheWriteTimeoutSeconds:     2,
+		MaxFileSize:                  50, // 50MB
 	}
 }
 
@@ -65,6 +75,16 @@ func LoadConfigFromEnv() *Config {
 	}
 	if v := os.Getenv("OPENSEARCH_PASSWORD"); v != "" {
 		cfg.OpenSearchPassword = v
+	}
+	if v := os.Getenv("OPENSEARCH_INSECURE_SKIP_VERIFY"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.OpenSearchInsecureSkipVerify = b
+		}
+	}
+	if v := os.Getenv("OPENSEARCH_HTTP_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.OpenSearchHTTPTimeoutSeconds = n
+		}
 	}
 	if v := os.Getenv("OPENSEARCH_INDEX_PREFIX"); v != "" {
 		cfg.IndexPrefix = v
@@ -93,6 +113,16 @@ func LoadConfigFromEnv() *Config {
 			cfg.EmbeddingDims = n
 		}
 	}
+	if v := os.Getenv("RAG_EMBEDDING_HTTP_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.EmbeddingHTTPTimeoutSeconds = n
+		}
+	}
+	if v := os.Getenv("RAG_EMBEDDING_BATCH_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.EmbeddingBatchSize = n
+		}
+	}
 
 	if v := os.Getenv("RAG_RERANK_PROVIDER"); v != "" {
 		cfg.RerankProvider = v
@@ -116,6 +146,11 @@ func LoadConfigFromEnv() *Config {
 			cfg.CacheTTL = n
 		}
 	}
+	if v := os.Getenv("RAG_CACHE_WRITE_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.CacheWriteTimeoutSeconds = n
+		}
+	}
 	if v := os.Getenv("RAG_MAX_FILE_SIZE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.MaxFileSize = n
@@ -128,6 +163,9 @@ func LoadConfigFromEnv() *Config {
 		"default_mode", cfg.DefaultMode,
 		"default_top_k", cfg.DefaultTopK,
 		"cache_ttl", cfg.CacheTTL,
+		"cache_write_timeout_seconds", cfg.CacheWriteTimeoutSeconds,
+		"embedding_http_timeout_seconds", cfg.EmbeddingHTTPTimeoutSeconds,
+		"embedding_batch_size", cfg.EmbeddingBatchSize,
 		"max_file_size_mb", cfg.MaxFileSize,
 	)
 

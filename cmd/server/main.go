@@ -57,7 +57,7 @@ func main() {
 	pgRepo := postgres.NewRepository(db)
 	repo = pgRepo
 
-	migrateCtx, migrateCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	migrateCtx, migrateCancel := context.WithTimeout(context.Background(), time.Duration(cfg.Runtime.MigrationTimeoutSeconds)*time.Second)
 	defer migrateCancel()
 	if err := pgRepo.EnsureRunColumns(migrateCtx); err != nil {
 		applog.Warnf("⚠️  Failed to ensure run columns: %v", err)
@@ -104,6 +104,7 @@ func main() {
 	serverConfig.Port = cfg.Server.Port
 	serverConfig.ReadTimeout = time.Duration(cfg.Server.ReadTimeoutSeconds) * time.Second
 	serverConfig.WriteTimeout = time.Duration(cfg.Server.WriteTimeoutSeconds) * time.Second
+	serverConfig.RunTimeout = time.Duration(cfg.Server.RunTimeoutSeconds) * time.Second
 	serverConfig.JWTSecret = cfg.Auth.JWTSecret
 	serverConfig.JWTIssuer = cfg.Auth.JWTIssuer
 	server := api.NewServer(serverConfig, repo, runner)
@@ -111,7 +112,10 @@ func main() {
 	ragCfg := &cfg.RAG
 	if ragCfg.OpenSearchURL != "" {
 		rclient := opensearch.NewClient(ragCfg)
-		if err := rclient.Ping(context.Background()); err != nil {
+		pingCtx, pingCancel := context.WithTimeout(context.Background(), time.Duration(cfg.Runtime.OpenSearchPingTimeoutSeconds)*time.Second)
+		err = rclient.Ping(pingCtx)
+		pingCancel()
+		if err != nil {
 			applog.Warnf("⚠️  OpenSearch ping failed: %v (RAG disabled)", err)
 		} else {
 			applog.Info("✅ Connected to OpenSearch")
@@ -121,10 +125,12 @@ func main() {
 			embeddingDims := 0
 			if ragCfg.HasEmbedding() {
 				embedder := rag.NewOpenAIEmbedder(rag.OpenAIEmbedderConfig{
-					BaseURL: cfg.OpenAI.BaseURL,
-					APIKey:  cfg.OpenAI.APIKey,
-					Model:   ragCfg.EmbeddingModel,
-					Dims:    ragCfg.EmbeddingDims,
+					BaseURL:        cfg.OpenAI.BaseURL,
+					APIKey:         cfg.OpenAI.APIKey,
+					Model:          ragCfg.EmbeddingModel,
+					Dims:           ragCfg.EmbeddingDims,
+					TimeoutSeconds: ragCfg.EmbeddingHTTPTimeoutSeconds,
+					BatchSize:      ragCfg.EmbeddingBatchSize,
 				})
 				retriever.SetEmbedder(embedder)
 				indexer.SetEmbedder(embedder)
@@ -154,7 +160,7 @@ func main() {
 			indexer.SetParsers(parsers)
 			applog.Infof("✅ RAG Parser registry initialized (types: %s)", parsers.SupportedTypes())
 
-			server.SetRAG(retriever, indexer)
+			server.SetRAG(retriever, indexer, ragCfg.MaxFileSize)
 			runner.SetRetriever(retriever)
 
 			if err := rclient.EnsureIndex(context.Background(), embeddingDims); err != nil {
@@ -177,7 +183,7 @@ func main() {
 		<-sigCh
 
 		applog.Info("🔄 Shutting down...")
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Runtime.ShutdownTimeoutSeconds)*time.Second)
 		defer cancel()
 
 		if err := server.Stop(ctx); err != nil {
@@ -203,7 +209,7 @@ func initMemory(db *sql.DB, cfg *config.AppConfig) *memory.Coordinator {
 	}
 
 	redisClient := goredis.NewClient(opt)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Runtime.RedisPingTimeoutSeconds)*time.Second)
 	defer cancel()
 	if err := redisClient.Ping(ctx).Err(); err != nil {
 		applog.Fatalf("❌ Redis connection failed: %v", err)
@@ -231,7 +237,7 @@ func initMemory(db *sql.DB, cfg *config.AppConfig) *memory.Coordinator {
 		Redis: redisClient,
 	})
 
-	ctxDB, cancelDB := context.WithTimeout(context.Background(), 5*time.Second)
+	ctxDB, cancelDB := context.WithTimeout(context.Background(), time.Duration(cfg.Runtime.MTMEnsureTimeoutSeconds)*time.Second)
 	defer cancelDB()
 	if err := mtm.EnsureTable(ctxDB); err != nil {
 		applog.Warnf("⚠️  Failed to create conversation_summaries table: %v", err)

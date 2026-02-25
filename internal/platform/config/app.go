@@ -17,6 +17,7 @@ type AppConfig struct {
 	LogLevel  string         `json:"log_level"`
 	LogFormat string         `json:"log_format"`
 	Server    ServerConfig   `json:"server"`
+	Runtime   RuntimeConfig  `json:"runtime"`
 	Database  DatabaseConfig `json:"database"`
 	Redis     RedisConfig    `json:"redis"`
 	Engine    EngineConfig   `json:"engine"`
@@ -32,6 +33,15 @@ type ServerConfig struct {
 	Port                int    `json:"port"`
 	ReadTimeoutSeconds  int    `json:"read_timeout_seconds"`
 	WriteTimeoutSeconds int    `json:"write_timeout_seconds"`
+	RunTimeoutSeconds   int    `json:"run_timeout_seconds"`
+}
+
+type RuntimeConfig struct {
+	MigrationTimeoutSeconds      int `json:"migration_timeout_seconds"`
+	RedisPingTimeoutSeconds      int `json:"redis_ping_timeout_seconds"`
+	MTMEnsureTimeoutSeconds      int `json:"mtm_ensure_timeout_seconds"`
+	ShutdownTimeoutSeconds       int `json:"shutdown_timeout_seconds"`
+	OpenSearchPingTimeoutSeconds int `json:"opensearch_ping_timeout_seconds"`
 }
 
 type DatabaseConfig struct {
@@ -85,6 +95,14 @@ func Default() *AppConfig {
 			Port:                8080,
 			ReadTimeoutSeconds:  30,
 			WriteTimeoutSeconds: 600,
+			RunTimeoutSeconds:   300,
+		},
+		Runtime: RuntimeConfig{
+			MigrationTimeoutSeconds:      10,
+			RedisPingTimeoutSeconds:      3,
+			MTMEnsureTimeoutSeconds:      5,
+			ShutdownTimeoutSeconds:       10,
+			OpenSearchPingTimeoutSeconds: 5,
 		},
 		Database: DatabaseConfig{
 			MaxOpenConns:           25,
@@ -156,6 +174,13 @@ func (c *AppConfig) applyEnv() {
 	applyInt("PORT", &c.Server.Port)
 	applyInt("SERVER_READ_TIMEOUT", &c.Server.ReadTimeoutSeconds)
 	applyInt("SERVER_WRITE_TIMEOUT", &c.Server.WriteTimeoutSeconds)
+	applyInt("SERVER_RUN_TIMEOUT", &c.Server.RunTimeoutSeconds)
+
+	applyInt("RUNTIME_MIGRATION_TIMEOUT", &c.Runtime.MigrationTimeoutSeconds)
+	applyInt("RUNTIME_REDIS_PING_TIMEOUT", &c.Runtime.RedisPingTimeoutSeconds)
+	applyInt("RUNTIME_MTM_ENSURE_TIMEOUT", &c.Runtime.MTMEnsureTimeoutSeconds)
+	applyInt("RUNTIME_SHUTDOWN_TIMEOUT", &c.Runtime.ShutdownTimeoutSeconds)
+	applyInt("RUNTIME_OPENSEARCH_PING_TIMEOUT", &c.Runtime.OpenSearchPingTimeoutSeconds)
 
 	applyString("DATABASE_URL", &c.Database.URL)
 	applyInt("DATABASE_MAX_OPEN_CONNS", &c.Database.MaxOpenConns)
@@ -187,6 +212,8 @@ func (c *AppConfig) applyEnv() {
 	applyString("OPENSEARCH_URL", &c.RAG.OpenSearchURL)
 	applyString("OPENSEARCH_USERNAME", &c.RAG.OpenSearchUsername)
 	applyString("OPENSEARCH_PASSWORD", &c.RAG.OpenSearchPassword)
+	applyBool("OPENSEARCH_INSECURE_SKIP_VERIFY", &c.RAG.OpenSearchInsecureSkipVerify)
+	applyInt("OPENSEARCH_HTTP_TIMEOUT", &c.RAG.OpenSearchHTTPTimeoutSeconds)
 	applyString("OPENSEARCH_INDEX_PREFIX", &c.RAG.IndexPrefix)
 	if v := os.Getenv("RAG_DEFAULT_MODE"); v != "" {
 		c.RAG.DefaultMode = rag.RetrievalMode(v)
@@ -200,11 +227,14 @@ func (c *AppConfig) applyEnv() {
 	applyString("RAG_EMBEDDING_PROVIDER", &c.RAG.EmbeddingProvider)
 	applyString("RAG_EMBEDDING_MODEL", &c.RAG.EmbeddingModel)
 	applyInt("RAG_EMBEDDING_DIMS", &c.RAG.EmbeddingDims)
+	applyInt("RAG_EMBEDDING_HTTP_TIMEOUT", &c.RAG.EmbeddingHTTPTimeoutSeconds)
+	applyInt("RAG_EMBEDDING_BATCH_SIZE", &c.RAG.EmbeddingBatchSize)
 	applyString("RAG_RERANK_PROVIDER", &c.RAG.RerankProvider)
 	applyString("RAG_RERANK_MODEL", &c.RAG.RerankModel)
 	applyInt("RAG_CHUNK_SIZE", &c.RAG.ChunkSize)
 	applyInt("RAG_CHUNK_OVERLAP", &c.RAG.ChunkOverlap)
 	applyInt("RAG_CACHE_TTL", &c.RAG.CacheTTL)
+	applyInt("RAG_CACHE_WRITE_TIMEOUT", &c.RAG.CacheWriteTimeoutSeconds)
 	applyInt("RAG_MAX_FILE_SIZE", &c.RAG.MaxFileSize)
 }
 
@@ -248,6 +278,14 @@ func applyFloat64(key string, target *float64) {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.ParseFloat(v, 64); err == nil {
 			*target = n
+		}
+	}
+}
+
+func applyBool(key string, target *bool) {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			*target = b
 		}
 	}
 }

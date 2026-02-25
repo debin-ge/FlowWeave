@@ -21,8 +21,9 @@ type ServerConfig struct {
 	Port         int
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
-	JWTSecret    string // JWT 签名密钥，为空则跳过鉴权
-	JWTIssuer    string // JWT 签发者（可选）
+	RunTimeout   time.Duration // 工作流执行超时（同步/流式）
+	JWTSecret    string        // JWT 签名密钥，为空则跳过鉴权
+	JWTIssuer    string        // JWT 签发者（可选）
 }
 
 // DefaultServerConfig 默认配置
@@ -32,6 +33,7 @@ func DefaultServerConfig() *ServerConfig {
 		Port:         8080,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 10 * time.Minute, // SSE 需要较长写超时
+		RunTimeout:   5 * time.Minute,
 	}
 }
 
@@ -42,6 +44,7 @@ type Server struct {
 	runner    *workflow.WorkflowRunner
 	retriever *rag.Retriever
 	indexer   *rag.Indexer
+	ragMaxMB  int
 	httpSrv   *http.Server
 }
 
@@ -58,9 +61,10 @@ func NewServer(config *ServerConfig, repo port.Repository, runner *workflow.Work
 }
 
 // SetRAG 设置 RAG 组件（可选，仅在 OpenSearch 配置时启用）
-func (s *Server) SetRAG(retriever *rag.Retriever, indexer *rag.Indexer) {
+func (s *Server) SetRAG(retriever *rag.Retriever, indexer *rag.Indexer, maxFileMB int) {
 	s.retriever = retriever
 	s.indexer = indexer
+	s.ragMaxMB = maxFileMB
 }
 
 // Start 启动服务器
@@ -91,7 +95,7 @@ func (s *Server) Start() error {
 			r.Use(authMiddleware(jwtCfg))
 
 			// 注册工作流 API
-			handler := NewWorkflowHandler(s.repo, s.runner)
+			handler := NewWorkflowHandler(s.repo, s.runner, s.config.RunTimeout)
 			handler.RegisterRoutes(r)
 
 			// 注册租户和组织 API
@@ -102,7 +106,7 @@ func (s *Server) Start() error {
 
 			// 注册 RAG API（仅在配置时启用）
 			if s.retriever != nil || s.indexer != nil {
-				ragHandler := NewRAGHandler(s.repo, s.retriever, s.indexer)
+				ragHandler := NewRAGHandler(s.repo, s.retriever, s.indexer, s.ragMaxMB)
 				ragHandler.RegisterRoutes(r)
 				applog.Info("📚 RAG API enabled")
 			}
@@ -111,7 +115,7 @@ func (s *Server) Start() error {
 		applog.Warn("⚠️  JWT_SECRET not set, authentication disabled (development mode)")
 
 		// 注册工作流 API
-		handler := NewWorkflowHandler(s.repo, s.runner)
+		handler := NewWorkflowHandler(s.repo, s.runner, s.config.RunTimeout)
 		handler.RegisterRoutes(r)
 
 		// 注册租户和组织 API
@@ -122,7 +126,7 @@ func (s *Server) Start() error {
 
 		// 注册 RAG API（仅在配置时启用）
 		if s.retriever != nil || s.indexer != nil {
-			ragHandler := NewRAGHandler(s.repo, s.retriever, s.indexer)
+			ragHandler := NewRAGHandler(s.repo, s.retriever, s.indexer, s.ragMaxMB)
 			ragHandler.RegisterRoutes(r)
 			applog.Info("📚 RAG API enabled")
 		}
@@ -166,7 +170,7 @@ func (s *Server) Handler() http.Handler {
 		r.Use(authMiddleware(jwtCfg))
 	}
 
-	handler := NewWorkflowHandler(s.repo, s.runner)
+	handler := NewWorkflowHandler(s.repo, s.runner, s.config.RunTimeout)
 	handler.RegisterRoutes(r)
 
 	orgHandler := NewOrganizationHandler(s.repo)
@@ -175,7 +179,7 @@ func (s *Server) Handler() http.Handler {
 	tenantHandler.RegisterRoutes(r)
 
 	if s.retriever != nil || s.indexer != nil {
-		ragHandler := NewRAGHandler(s.repo, s.retriever, s.indexer)
+		ragHandler := NewRAGHandler(s.repo, s.retriever, s.indexer, s.ragMaxMB)
 		ragHandler.RegisterRoutes(r)
 	}
 	return r

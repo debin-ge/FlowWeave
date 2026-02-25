@@ -1,8 +1,8 @@
 package rag
 
 import (
-	applog "flowweave/internal/platform/log"
 	"context"
+	applog "flowweave/internal/platform/log"
 	"fmt"
 	"sort"
 	"strings"
@@ -105,8 +105,12 @@ func (r *Retriever) Search(ctx context.Context, req *SearchRequest) (*SearchResu
 	if r.cache != nil && result != nil {
 		cacheReq := cloneSearchRequest(req)
 		cacheResult := cloneSearchResult(result)
+		cacheWriteTimeout := time.Duration(r.config.CacheWriteTimeoutSeconds) * time.Second
+		if cacheWriteTimeout <= 0 {
+			cacheWriteTimeout = 2 * time.Second
+		}
 		go func() {
-			cacheCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			cacheCtx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
 			defer cancel()
 			r.cache.Set(cacheCtx, cacheReq, cacheResult)
 		}()

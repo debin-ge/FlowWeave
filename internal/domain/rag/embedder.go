@@ -1,10 +1,10 @@
 package rag
 
 import (
-	applog "flowweave/internal/platform/log"
 	"bytes"
 	"context"
 	"encoding/json"
+	applog "flowweave/internal/platform/log"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,19 +26,22 @@ type Embedder interface {
 
 // OpenAIEmbedder 调用 OpenAI 兼容 /v1/embeddings API
 type OpenAIEmbedder struct {
-	baseURL string
-	apiKey  string
-	model   string
-	dims    int
-	client  *http.Client
+	baseURL   string
+	apiKey    string
+	model     string
+	dims      int
+	batchSize int
+	client    *http.Client
 }
 
 // OpenAIEmbedderConfig 配置
 type OpenAIEmbedderConfig struct {
-	BaseURL string // e.g. https://api.openai.com/v1
-	APIKey  string
-	Model   string // e.g. text-embedding-3-small
-	Dims    int    // 向量维度
+	BaseURL        string // e.g. https://api.openai.com/v1
+	APIKey         string
+	Model          string // e.g. text-embedding-3-small
+	Dims           int    // 向量维度
+	TimeoutSeconds int    // HTTP 超时（秒）
+	BatchSize      int    // 单批文本数
 }
 
 // NewOpenAIEmbedder 创建 OpenAI 兼容 Embedder
@@ -53,13 +56,20 @@ func NewOpenAIEmbedder(cfg OpenAIEmbedderConfig) *OpenAIEmbedder {
 	if cfg.Dims <= 0 {
 		cfg.Dims = 1536
 	}
+	if cfg.TimeoutSeconds <= 0 {
+		cfg.TimeoutSeconds = 60
+	}
+	if cfg.BatchSize <= 0 {
+		cfg.BatchSize = 64
+	}
 
 	return &OpenAIEmbedder{
-		baseURL: cfg.BaseURL,
-		apiKey:  cfg.APIKey,
-		model:   cfg.Model,
-		dims:    cfg.Dims,
-		client:  &http.Client{Timeout: 60 * time.Second},
+		baseURL:   cfg.BaseURL,
+		apiKey:    cfg.APIKey,
+		model:     cfg.Model,
+		dims:      cfg.Dims,
+		batchSize: cfg.BatchSize,
+		client:    &http.Client{Timeout: time.Duration(cfg.TimeoutSeconds) * time.Second},
 	}
 }
 
@@ -74,8 +84,8 @@ func (e *OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32
 		return nil, nil
 	}
 
-	// 分批处理（每批最多 64 条，避免 API 限制）
-	const batchSize = 64
+	// 分批处理，批次大小可配置（避免 provider API 限制）
+	batchSize := e.batchSize
 	allVectors := make([][]float32, 0, len(texts))
 
 	for i := 0; i < len(texts); i += batchSize {

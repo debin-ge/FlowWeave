@@ -5,7 +5,15 @@
     "host": "0.0.0.0",
     "port": 8080,
     "read_timeout_seconds": 30,
-    "write_timeout_seconds": 600
+    "write_timeout_seconds": 600,
+    "run_timeout_seconds": 300
+  },
+  "runtime": {
+    "migration_timeout_seconds": 10,
+    "redis_ping_timeout_seconds": 3,
+    "mtm_ensure_timeout_seconds": 5,
+    "shutdown_timeout_seconds": 10,
+    "opensearch_ping_timeout_seconds": 5
   },
   "database": {
     "url": "postgres://user:password@localhost:5432/flowweave?sslmode=disable",
@@ -41,9 +49,11 @@
     "min_recent_turns": 4
   },
   "rag": {
-    "opensearch_url": "https://localhost:9200",
-    "opensearch_username": "admin",
-    "opensearch_password": "admin",
+    "opensearch_url": "http://opensearch:9200",
+    "opensearch_username": "",
+    "opensearch_password": "",
+    "opensearch_insecure_skip_verify": true,
+    "opensearch_http_timeout_seconds": 30,
     "index_prefix": "rag",
     "default_mode": "bm25",
     "enable_rerank": false,
@@ -51,11 +61,14 @@
     "embedding_provider": "openai",
     "embedding_model": "text-embedding-3-small",
     "embedding_dims": 1536,
+    "embedding_http_timeout_seconds": 60,
+    "embedding_batch_size": 64,
     "rerank_provider": "openai",
     "rerank_model": "gpt-4o-mini",
     "chunk_size": 512,
     "chunk_overlap": 128,
     "cache_ttl": 300,
+    "cache_write_timeout_seconds": 2,
     "max_file_size": 50
   }
 }

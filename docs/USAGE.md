@@ -29,6 +29,8 @@ cp .env.example .env
 - 通过 Compose 启动时，PostgreSQL 会自动执行初始化脚本
 - `migrations/postgres/schema.sql` 会在数据库首次启动时自动导入
 - OpenSearch 镜像构建阶段会安装 IK 插件，用于 `ik_max_word` 中文分词
+- `.env` 中同时包含 Compose 服务参数（如 `POSTGRES_*`、`REDIS_*`、`OPENSEARCH_*`）和应用参数
+- RAG 运行参数（如 `RAG_EMBEDDING_HTTP_TIMEOUT`、`RAG_EMBEDDING_BATCH_SIZE`、`RAG_CACHE_WRITE_TIMEOUT`）也可在 `.env` 中直接调优
 
 ## 3. 启动全套服务
 

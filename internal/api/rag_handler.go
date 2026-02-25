@@ -1,8 +1,8 @@
 package api
 
 import (
-	applog "flowweave/internal/platform/log"
 	"encoding/json"
+	applog "flowweave/internal/platform/log"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,14 +20,19 @@ type RAGHandler struct {
 	repo      port.Repository
 	retriever *rag.Retriever
 	indexer   *rag.Indexer
+	maxFileMB int
 }
 
 // NewRAGHandler 创建 RAG 处理器
-func NewRAGHandler(repo port.Repository, retriever *rag.Retriever, indexer *rag.Indexer) *RAGHandler {
+func NewRAGHandler(repo port.Repository, retriever *rag.Retriever, indexer *rag.Indexer, maxFileMB int) *RAGHandler {
+	if maxFileMB <= 0 {
+		maxFileMB = 50
+	}
 	return &RAGHandler{
 		repo:      repo,
 		retriever: retriever,
 		indexer:   indexer,
+		maxFileMB: maxFileMB,
 	}
 }
 
@@ -302,8 +307,10 @@ func (h *RAGHandler) UploadDocument(w http.ResponseWriter, r *http.Request) {
 
 	datasetID := chi.URLParam(r, "datasetID")
 
-	// 解析 multipart（限制 50MB）
-	if err := r.ParseMultipartForm(50 << 20); err != nil {
+	limitBytes := int64(h.maxFileMB) << 20
+
+	// 解析 multipart（限制 maxFileMB MB）
+	if err := r.ParseMultipartForm(limitBytes); err != nil {
 		writeError(w, http.StatusBadRequest, "failed to parse multipart form")
 		return
 	}
@@ -314,6 +321,11 @@ func (h *RAGHandler) UploadDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
+
+	if header.Size > 0 && header.Size > limitBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("file size exceeds limit (%dMB)", h.maxFileMB))
+		return
+	}
 
 	filename := header.Filename
 	title := r.FormValue("title")

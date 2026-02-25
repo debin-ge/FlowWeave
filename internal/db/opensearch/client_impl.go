@@ -1,11 +1,11 @@
 package opensearch
 
 import (
-	applog "flowweave/internal/platform/log"
 	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	applog "flowweave/internal/platform/log"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,15 +26,20 @@ type Client struct {
 
 // NewClient 创建 OpenSearch 客户端
 func NewClient(cfg *domainrag.Config) *Client {
+	timeout := time.Duration(cfg.OpenSearchHTTPTimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+
 	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // 开发环境
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.OpenSearchInsecureSkipVerify}, //nolint:gosec // 由配置控制
 	}
 	return &Client{
 		baseURL:  strings.TrimRight(cfg.OpenSearchURL, "/"),
 		username: cfg.OpenSearchUsername,
 		password: cfg.OpenSearchPassword,
 		httpClient: &http.Client{
-			Timeout:   30 * time.Second,
+			Timeout:   timeout,
 			Transport: transport,
 		},
 		indexName: cfg.ChunkIndexName(),
