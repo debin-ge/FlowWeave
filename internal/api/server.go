@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -22,7 +23,7 @@ type ServerConfig struct {
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
 	RunTimeout   time.Duration // 工作流执行超时（同步/流式）
-	JWTSecret    string        // JWT 签名密钥，为空则跳过鉴权
+	JWTSecret    string        // JWT 签名密钥（必填）
 	JWTIssuer    string        // JWT 签发者（可选）
 }
 
@@ -69,68 +70,9 @@ func (s *Server) SetRAG(retriever *rag.Retriever, indexer *rag.Indexer, maxFileM
 
 // Start 启动服务器
 func (s *Server) Start() error {
-	r := chi.NewRouter()
-
-	// 基础中间件（必须在所有路由定义之前注册）
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.RequestID)
-	r.Use(corsMiddleware)
-
-	// 健康检查（无需鉴权，放在 JWT 中间件之前）
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
-
-	// JWT 鉴权中间件（仅当 JWT_SECRET 配置时启用）
-	// 使用 Group 包裹需要鉴权的路由，避免 chi 的中间件顺序限制
-	orgHandler := NewOrganizationHandler(s.repo)
-	tenantHandler := NewTenantHandler(s.repo)
-	if s.config.JWTSecret != "" {
-		jwtCfg := &JWTConfig{
-			Secret: s.config.JWTSecret,
-			Issuer: s.config.JWTIssuer,
-		}
-		applog.Info("🔐 JWT authentication enabled")
-		// 组织/租户创建接口允许免 JWT，便于初始化注册
-		orgHandler.RegisterPublicRoutes(r)
-		tenantHandler.RegisterPublicRoutes(r)
-
-		r.Group(func(r chi.Router) {
-			r.Use(authMiddleware(jwtCfg))
-
-			// 注册工作流 API
-			handler := NewWorkflowHandler(s.repo, s.runner, s.config.RunTimeout)
-			handler.RegisterRoutes(r)
-
-			// 注册租户和组织 API
-			orgHandler.RegisterProtectedRoutes(r)
-			tenantHandler.RegisterProtectedRoutes(r)
-
-			// 注册 RAG API（仅在配置时启用）
-			if s.retriever != nil || s.indexer != nil {
-				ragHandler := NewRAGHandler(s.repo, s.retriever, s.indexer, s.ragMaxMB)
-				ragHandler.RegisterRoutes(r)
-				applog.Info("📚 RAG API enabled")
-			}
-		})
-	} else {
-		applog.Warn("⚠️  JWT_SECRET not set, authentication disabled (development mode)")
-
-		// 注册工作流 API
-		handler := NewWorkflowHandler(s.repo, s.runner, s.config.RunTimeout)
-		handler.RegisterRoutes(r)
-
-		// 注册租户和组织 API
-		orgHandler.RegisterRoutes(r)
-		tenantHandler.RegisterRoutes(r)
-
-		// 注册 RAG API（仅在配置时启用）
-		if s.retriever != nil || s.indexer != nil {
-			ragHandler := NewRAGHandler(s.repo, s.retriever, s.indexer, s.ragMaxMB)
-			ragHandler.RegisterRoutes(r)
-			applog.Info("📚 RAG API enabled")
-		}
+	r, err := s.buildRouter()
+	if err != nil {
+		return err
 	}
 
 	addr := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
@@ -155,46 +97,70 @@ func (s *Server) Stop(ctx context.Context) error {
 
 // Handler 返回 HTTP Handler（用于测试）
 func (s *Server) Handler() http.Handler {
+	r, err := s.buildRouter()
+	if err != nil {
+		panic(err)
+	}
+	return r
+}
+
+func (s *Server) buildRouter() (http.Handler, error) {
+	if strings.TrimSpace(s.config.JWTSecret) == "" {
+		return nil, fmt.Errorf("JWT_SECRET is required")
+	}
+
 	r := chi.NewRouter()
+
+	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(middleware.RequestID)
+	r.Use(corsMiddleware)
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
+	workflowHandler := NewWorkflowHandler(s.repo, s.runner, s.config.RunTimeout)
 	orgHandler := NewOrganizationHandler(s.repo)
 	tenantHandler := NewTenantHandler(s.repo)
-	if s.config.JWTSecret != "" {
-		jwtCfg := &JWTConfig{
-			Secret: s.config.JWTSecret,
-			Issuer: s.config.JWTIssuer,
-		}
-		// 测试模式与正式模式保持一致：仅创建组织/租户免 JWT
-		orgHandler.RegisterPublicRoutes(r)
-		tenantHandler.RegisterPublicRoutes(r)
-		r.Group(func(r chi.Router) {
-			r.Use(authMiddleware(jwtCfg))
-			handler := NewWorkflowHandler(s.repo, s.runner, s.config.RunTimeout)
-			handler.RegisterRoutes(r)
-			orgHandler.RegisterProtectedRoutes(r)
-			tenantHandler.RegisterProtectedRoutes(r)
-			if s.retriever != nil || s.indexer != nil {
-				ragHandler := NewRAGHandler(s.repo, s.retriever, s.indexer, s.ragMaxMB)
-				ragHandler.RegisterRoutes(r)
-			}
-		})
-		return r
-	}
+	ragEnabled := s.retriever != nil || s.indexer != nil
 
-	handler := NewWorkflowHandler(s.repo, s.runner, s.config.RunTimeout)
-	handler.RegisterRoutes(r)
-	orgHandler.RegisterRoutes(r)
-	tenantHandler.RegisterRoutes(r)
-	if s.retriever != nil || s.indexer != nil {
-		ragHandler := NewRAGHandler(s.repo, s.retriever, s.indexer, s.ragMaxMB)
-		ragHandler.RegisterRoutes(r)
+	jwtCfg := &JWTConfig{
+		Secret: s.config.JWTSecret,
+		Issuer: s.config.JWTIssuer,
 	}
-	return r
+	authMW := authMiddleware(jwtCfg)
+
+	s.registerPublicRoutes(r, orgHandler, tenantHandler)
+	s.registerProtectedRoutes(r, authMW, workflowHandler, orgHandler, tenantHandler, ragEnabled)
+	return r, nil
+}
+
+func (s *Server) registerPublicRoutes(r chi.Router, orgHandler *OrganizationHandler, tenantHandler *TenantHandler) {
+	orgHandler.RegisterPublicRoutes(r)
+	tenantHandler.RegisterPublicRoutes(r)
+}
+
+func (s *Server) registerProtectedRoutes(
+	r chi.Router,
+	authMW func(http.Handler) http.Handler,
+	workflowHandler *WorkflowHandler,
+	orgHandler *OrganizationHandler,
+	tenantHandler *TenantHandler,
+	ragEnabled bool,
+) {
+	orgHandler.RegisterProtectedRoutesWithMiddleware(r, authMW)
+	tenantHandler.RegisterProtectedRoutesWithMiddleware(r, authMW)
+
+	r.Group(func(r chi.Router) {
+		r.Use(authMW)
+		workflowHandler.RegisterRoutes(r)
+		if ragEnabled {
+			ragHandler := NewRAGHandler(s.repo, s.retriever, s.indexer, s.ragMaxMB)
+			ragHandler.RegisterRoutes(r)
+			applog.Info("📚 RAG API enabled")
+		}
+	})
 }
 
 // corsMiddleware CORS 中间件

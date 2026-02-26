@@ -35,7 +35,7 @@ cp .env.example .env
 至少修改以下变量：
 
 - `OPENAI_API_KEY`
-- `JWT_SECRET`（建议生产必须设置）
+- `JWT_SECRET`（必填，服务启动会校验）
 - `OPENSEARCH_IK_PLUGIN_URL`（必须，安装中文 IK 插件）
 
 常用可调参数（避免硬编码）：

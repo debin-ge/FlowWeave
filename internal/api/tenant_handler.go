@@ -25,17 +25,23 @@ func (h *OrganizationHandler) RegisterRoutes(r chi.Router) {
 
 // RegisterPublicRoutes 注册无需鉴权的组织路由（注册/初始化场景）
 func (h *OrganizationHandler) RegisterPublicRoutes(r chi.Router) {
+	r.Post("/organizations", h.CreateOrganization)
 	r.Post("/organizations/", h.CreateOrganization)
 }
 
 // RegisterProtectedRoutes 注册需要鉴权的组织路由
 func (h *OrganizationHandler) RegisterProtectedRoutes(r chi.Router) {
-	r.Route("/organizations", func(r chi.Router) {
-		r.Get("/", h.ListOrganizations)
-		r.Get("/{id}", h.GetOrganization)
-		r.Put("/{id}", h.UpdateOrganization)
-		r.Delete("/{id}", h.DeleteOrganization)
-	})
+	h.RegisterProtectedRoutesWithMiddleware(r)
+}
+
+// RegisterProtectedRoutesWithMiddleware 注册需要鉴权的组织路由，并附加中间件
+func (h *OrganizationHandler) RegisterProtectedRoutesWithMiddleware(r chi.Router, mws ...func(http.Handler) http.Handler) {
+	rr := r.With(mws...)
+	rr.Get("/organizations", h.ListOrganizations)
+	rr.Get("/organizations/", h.ListOrganizations)
+	rr.Get("/organizations/{id}", h.GetOrganization)
+	rr.Put("/organizations/{id}", h.UpdateOrganization)
+	rr.Delete("/organizations/{id}", h.DeleteOrganization)
 }
 
 func (h *OrganizationHandler) CreateOrganization(w http.ResponseWriter, r *http.Request) {
@@ -149,17 +155,23 @@ func (h *TenantHandler) RegisterRoutes(r chi.Router) {
 
 // RegisterPublicRoutes 注册无需鉴权的租户路由（注册/初始化场景）
 func (h *TenantHandler) RegisterPublicRoutes(r chi.Router) {
+	r.Post("/tenants", h.CreateTenant)
 	r.Post("/tenants/", h.CreateTenant)
 }
 
 // RegisterProtectedRoutes 注册需要鉴权的租户路由
 func (h *TenantHandler) RegisterProtectedRoutes(r chi.Router) {
-	r.Route("/tenants", func(r chi.Router) {
-		r.Get("/", h.ListTenants)
-		r.Get("/{id}", h.GetTenant)
-		r.Put("/{id}", h.UpdateTenant)
-		r.Delete("/{id}", h.DeleteTenant)
-	})
+	h.RegisterProtectedRoutesWithMiddleware(r)
+}
+
+// RegisterProtectedRoutesWithMiddleware 注册需要鉴权的租户路由，并附加中间件
+func (h *TenantHandler) RegisterProtectedRoutesWithMiddleware(r chi.Router, mws ...func(http.Handler) http.Handler) {
+	rr := r.With(mws...)
+	rr.Get("/tenants", h.ListTenants)
+	rr.Get("/tenants/", h.ListTenants)
+	rr.Get("/tenants/{id}", h.GetTenant)
+	rr.Put("/tenants/{id}", h.UpdateTenant)
+	rr.Delete("/tenants/{id}", h.DeleteTenant)
 }
 
 func (h *TenantHandler) CreateTenant(w http.ResponseWriter, r *http.Request) {

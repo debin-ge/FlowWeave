@@ -164,7 +164,7 @@ FlowWeave 当前版本围绕 5 个能力域构建：
 
 ## 7. 功能开关与降级行为
 
-- 未配置 `JWT_SECRET`：鉴权关闭，进入开发兼容模式
+- 未配置 `JWT_SECRET`：服务启动失败（强制鉴权配置）
 - 未配置 `OPENAI_API_KEY`：LLM Provider 不注册，LLM 节点不可用
 - OpenSearch 不可用：RAG API 不启用，核心 workflow 能力可继续运行
 

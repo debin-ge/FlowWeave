@@ -30,7 +30,7 @@ OpenSearch 2.12+ 额外说明：
 
 常用建议项：
 
-- `JWT_SECRET`（生产建议开启）
+- `JWT_SECRET`（必填）
 
 说明：
 
@@ -113,7 +113,7 @@ SSE 事件类型：
 
 ## 6. 鉴权使用（JWT）
 
-当配置 `JWT_SECRET` 后，业务接口需要：
+配置 `JWT_SECRET` 后，业务接口需要：
 
 ```http
 Authorization: Bearer <token>
