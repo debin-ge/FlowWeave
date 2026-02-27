@@ -94,7 +94,12 @@ func main() {
 		MaxNodeSteps: cfg.Engine.MaxNodeSteps,
 	}
 
-	initLLMProviders(cfg.OpenAI.APIKey, cfg.OpenAI.BaseURL)
+	initLLMProviders(
+		cfg.OpenAI.APIKey,
+		cfg.OpenAI.BaseURL,
+		cfg.OpenAI.ConnectTimeoutSeconds,
+		cfg.OpenAI.TLSHandshakeTimeoutSeconds,
+	)
 
 	memCoord := initMemory(db, cfg)
 	runner := workflow.NewWorkflowRunner(engineConfig, memCoord)
@@ -198,8 +203,8 @@ func main() {
 	applog.Info("👋 Server stopped")
 }
 
-func initLLMProviders(apiKey, baseURL string) {
-	bootstrap.RegisterLLMProviders(apiKey, baseURL)
+func initLLMProviders(apiKey, baseURL string, connectTimeoutSeconds, tlsHandshakeTimeoutSeconds int) {
+	bootstrap.RegisterLLMProviders(apiKey, baseURL, connectTimeoutSeconds, tlsHandshakeTimeoutSeconds)
 }
 
 func initMemory(db *sql.DB, cfg *config.AppConfig) *memory.Coordinator {

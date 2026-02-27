@@ -47,7 +47,7 @@ FlowWeave 当前版本围绕 5 个能力域构建：
 - `if-else`
 - `template`
 - `http-request`
-- `code`
+- `func`
 - `iteration`
 - `answer`
 - `end`

@@ -35,7 +35,9 @@
   },
   "openai": {
     "api_key": "",
-    "base_url": "https://api.openai.com/v1"
+    "base_url": "https://api.openai.com/v1",
+    "connect_timeout_seconds": 30,
+    "tls_handshake_timeout_seconds": 30
   },
   "summary": {
     "provider": "openai",

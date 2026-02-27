@@ -9,7 +9,7 @@ const (
 	NodeTypeAnswer             NodeType = "answer"
 	NodeTypeLLM                NodeType = "llm"
 	NodeTypeIfElse             NodeType = "if-else"
-	NodeTypeCode               NodeType = "code"
+	NodeTypeFunc               NodeType = "func"
 	NodeTypeTemplateTransform  NodeType = "template-transform"
 	NodeTypeQuestionClassifier NodeType = "question-classifier"
 	NodeTypeHTTPRequest        NodeType = "http-request"

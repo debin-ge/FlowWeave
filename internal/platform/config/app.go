@@ -67,8 +67,10 @@ type AuthConfig struct {
 }
 
 type OpenAIConfig struct {
-	APIKey  string `json:"api_key"`
-	BaseURL string `json:"base_url"`
+	APIKey                     string `json:"api_key"`
+	BaseURL                    string `json:"base_url"`
+	ConnectTimeoutSeconds      int    `json:"connect_timeout_seconds"`
+	TLSHandshakeTimeoutSeconds int    `json:"tls_handshake_timeout_seconds"`
 }
 
 type SummaryConfig struct {
@@ -115,7 +117,9 @@ func Default() *AppConfig {
 			MaxNodeSteps:       100,
 		},
 		OpenAI: OpenAIConfig{
-			BaseURL: "https://api.openai.com/v1",
+			BaseURL:                    "https://api.openai.com/v1",
+			ConnectTimeoutSeconds:      30,
+			TLSHandshakeTimeoutSeconds: 30,
 		},
 		Summary: SummaryConfig{
 			Provider: "openai",
@@ -198,6 +202,8 @@ func (c *AppConfig) applyEnv() {
 
 	applyString("OPENAI_API_KEY", &c.OpenAI.APIKey)
 	applyString("OPENAI_BASE_URL", &c.OpenAI.BaseURL)
+	applyInt("OPENAI_CONNECT_TIMEOUT", &c.OpenAI.ConnectTimeoutSeconds)
+	applyInt("OPENAI_TLS_HANDSHAKE_TIMEOUT", &c.OpenAI.TLSHandshakeTimeoutSeconds)
 
 	applyString("SUMMARY_LLM_PROVIDER", &c.Summary.Provider)
 	applyString("SUMMARY_LLM_MODEL", &c.Summary.Model)
@@ -241,6 +247,12 @@ func (c *AppConfig) applyEnv() {
 func (c *AppConfig) normalize() {
 	if c.OpenAI.BaseURL == "" {
 		c.OpenAI.BaseURL = "https://api.openai.com/v1"
+	}
+	if c.OpenAI.ConnectTimeoutSeconds <= 0 {
+		c.OpenAI.ConnectTimeoutSeconds = 30
+	}
+	if c.OpenAI.TLSHandshakeTimeoutSeconds <= 0 {
+		c.OpenAI.TLSHandshakeTimeoutSeconds = 30
 	}
 	if c.Gateway.Provider == "" {
 		c.Gateway.Provider = c.Summary.Provider

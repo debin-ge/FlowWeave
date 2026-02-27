@@ -14,27 +14,30 @@ import (
 	"flowweave/internal/domain/workflow/graph"
 	types "flowweave/internal/domain/workflow/model"
 	"flowweave/internal/domain/workflow/node"
-	nodecode "flowweave/internal/domain/workflow/node/code"
+	"flowweave/internal/domain/workflow/node/code"
 	"flowweave/internal/domain/workflow/runtime"
 
 	_ "flowweave/internal/app/bootstrap"
 )
 
-// failingExecutor 始终返回错误的代码执行器
-type failingExecutor struct{}
+// failingFunction 始终返回错误
+type failingFunction struct{}
 
-func (e *failingExecutor) Execute(ctx context.Context, language, code string, inputs map[string]interface{}) (map[string]interface{}, error) {
-	return nil, fmt.Errorf("simulated failure: %s", code)
+func (f *failingFunction) Name() string {
+	return "test.code.fail.v1"
+}
+
+func (f *failingFunction) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+	return nil, fmt.Errorf("simulated failure")
+}
+
+func init() {
+	code.MustRegisterFunction(&failingFunction{})
 }
 
 // --- 错误策略：default-value ---
 
 func TestErrorStrategy_DefaultValue(t *testing.T) {
-	// 设置失败执行器
-	origExecutor := nodecode.GetCodeExecutor()
-	nodecode.SetCodeExecutor(&failingExecutor{})
-	defer nodecode.SetCodeExecutor(origExecutor)
-
 	dsl := json.RawMessage(`{
 		"nodes": [
 			{
@@ -47,16 +50,21 @@ func TestErrorStrategy_DefaultValue(t *testing.T) {
 					]
 				}
 			},
-			{
-				"id": "code_1",
-				"data": {
-					"type": "code",
-					"title": "Failing Code",
-					"language": "javascript",
-					"code": "simulated failure",
-					"error_strategy": "default-value",
-					"default_value": {
-						"result": "fallback_value"
+				{
+					"id": "code_1",
+					"data": {
+						"type": "func",
+						"title": "Failing Code",
+						"function_ref": "test.code.fail.v1",
+						"inputs": [
+							{"name": "query", "type": "string", "required": true, "value_selector": ["start_1", "query"]}
+						],
+						"outputs": [
+							{"name": "result", "type": "string", "required": false}
+						],
+						"error_strategy": "default-value",
+						"default_value": {
+							"result": "fallback_value"
 					}
 				}
 			},
@@ -97,11 +105,6 @@ func TestErrorStrategy_DefaultValue(t *testing.T) {
 // --- 错误策略：fail-branch ---
 
 func TestErrorStrategy_FailBranch(t *testing.T) {
-	// 设置失败执行器
-	origExecutor := nodecode.GetCodeExecutor()
-	nodecode.SetCodeExecutor(&failingExecutor{})
-	defer nodecode.SetCodeExecutor(origExecutor)
-
 	dsl := json.RawMessage(`{
 		"nodes": [
 			{
@@ -114,16 +117,21 @@ func TestErrorStrategy_FailBranch(t *testing.T) {
 					]
 				}
 			},
-			{
-				"id": "code_1",
-				"data": {
-					"type": "code",
-					"title": "Failing Code",
-					"language": "javascript",
-					"code": "node error",
-					"error_strategy": "fail-branch"
-				}
-			},
+				{
+					"id": "code_1",
+					"data": {
+						"type": "func",
+						"title": "Failing Code",
+						"function_ref": "test.code.fail.v1",
+						"inputs": [
+							{"name": "query", "type": "string", "required": true, "value_selector": ["start_1", "query"]}
+						],
+						"outputs": [
+							{"name": "result", "type": "string", "required": false}
+						],
+						"error_strategy": "fail-branch"
+					}
+				},
 			{
 				"id": "end_success",
 				"data": {
@@ -333,11 +341,6 @@ func TestCommandChannel_PauseResume(t *testing.T) {
 // --- 错误策略：retry ---
 
 func TestErrorStrategy_Retry(t *testing.T) {
-	// 设置失败执行器
-	origExecutor := nodecode.GetCodeExecutor()
-	nodecode.SetCodeExecutor(&failingExecutor{})
-	defer nodecode.SetCodeExecutor(origExecutor)
-
 	dsl := json.RawMessage(`{
 		"nodes": [
 			{
@@ -350,16 +353,21 @@ func TestErrorStrategy_Retry(t *testing.T) {
 					]
 				}
 			},
-			{
-				"id": "code_1",
-				"data": {
-					"type": "code",
-					"title": "Retry Code",
-					"language": "javascript",
-					"code": "always fails",
-					"error_strategy": "retry",
-					"retry": {
-						"max_retries": 2,
+				{
+					"id": "code_1",
+					"data": {
+						"type": "func",
+						"title": "Retry Code",
+						"function_ref": "test.code.fail.v1",
+						"inputs": [
+							{"name": "x", "type": "string", "required": true, "value_selector": ["start_1", "x"]}
+						],
+						"outputs": [
+							{"name": "result", "type": "string", "required": false}
+						],
+						"error_strategy": "retry",
+						"retry": {
+							"max_retries": 2,
 						"retry_interval": 10
 					}
 				}

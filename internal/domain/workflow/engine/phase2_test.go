@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,28 +55,21 @@ func (m *mockLLMProvider) StreamComplete(ctx context.Context, req *providerPkg.C
 	return chunkCh, errCh
 }
 
-// mockCodeExecutor 用于测试的 Mock Code 执行器
-type mockCodeExecutor struct{}
+type mockTransformFunction struct{}
 
-func (m *mockCodeExecutor) Execute(ctx context.Context, language, codeStr string, inputs map[string]interface{}) (map[string]interface{}, error) {
-	// 模拟代码执行：将输入转为大写
-	result := make(map[string]interface{})
-	for k, v := range inputs {
-		if s, ok := v.(string); ok {
-			result[k] = "PROCESSED:" + s
-		} else {
-			result[k] = v
-		}
-	}
-	result["language"] = language
-	return result, nil
+func (m *mockTransformFunction) Name() string { return "test.code.transform.v1" }
+
+func (m *mockTransformFunction) Execute(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+	inputText, _ := inputs["input_text"].(string)
+	return map[string]interface{}{
+		"result": "PROCESSED:" + strings.ToUpper(inputText),
+	}, nil
 }
 
 func init() {
 	// 注册 Mock Provider
 	provider.RegisterProvider(&mockLLMProvider{})
-	// 注册 Mock Code Executor
-	code.SetCodeExecutor(&mockCodeExecutor{})
+	code.MustRegisterFunction(&mockTransformFunction{})
 }
 
 // TestLLMNode 测试 LLM 节点
@@ -167,28 +161,32 @@ func TestCodeNode(t *testing.T) {
 					]
 				}
 			},
-			{
-				"id": "code_1",
-				"data": {
-					"type": "code",
-					"title": "Transform",
-					"code_language": "javascript",
-					"code": "return { result: input_text.toUpperCase() }",
-					"variables": [
-						{"variable": "input_text", "value_selector": ["start_1", "input_text"]}
-					],
-					"outputs": {
-						"result": {"type": "string"}
+				{
+						"id": "code_1",
+						"data": {
+							"type": "func",
+							"title": "Transform",
+							"function_ref": "test.code.transform.v1",
+						"inputs": [
+							{
+								"name": "input_text",
+								"type": "string",
+								"required": true,
+								"value_selector": ["start_1", "input_text"]
+							}
+						],
+						"outputs": [
+							{"name": "result", "type": "string", "required": true}
+						]
 					}
-				}
-			},
+				},
 			{
 				"id": "end_1",
 				"data": {
 					"type": "end",
 					"title": "End",
 					"outputs": [
-						{"variable": "result", "value_selector": ["code_1", "input_text"]}
+						{"variable": "result", "value_selector": ["code_1", "result"]}
 					]
 				}
 			}

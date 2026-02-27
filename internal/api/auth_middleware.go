@@ -1,6 +1,9 @@
 package api
 
 import (
+	"context"
+	"database/sql"
+	"flowweave/internal/domain/workflow/port"
 	applog "flowweave/internal/platform/log"
 	"fmt"
 	"net/http"
@@ -17,7 +20,7 @@ type JWTConfig struct {
 
 // authMiddleware JWT 鉴权中间件
 // 验证 Authorization: Bearer <token> 的有效性
-func authMiddleware(cfg *JWTConfig) func(http.Handler) http.Handler {
+func authMiddleware(cfg *JWTConfig, repo port.Repository) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// 从 Authorization 头中提取 token
@@ -68,6 +71,15 @@ func authMiddleware(cfg *JWTConfig) func(http.Handler) http.Handler {
 				writeErrorCode(w, http.StatusForbidden, "forbidden_scope", "Missing org_id or tenant_id in token")
 				return
 			}
+			if err := validateScopeClaims(r.Context(), repo, orgID, tenantID); err != nil {
+				if errorsIsScopeInvalid(err) {
+					writeErrorCode(w, http.StatusForbidden, "forbidden_scope", err.Error())
+					return
+				}
+				applog.Error("[Auth] Scope validation failed", "error", err)
+				writeErrorCode(w, http.StatusInternalServerError, "scope_validation_failed", "Failed to validate auth scope")
+				return
+			}
 
 			// 提取 roles
 			var roles []string
@@ -97,6 +109,54 @@ func authMiddleware(cfg *JWTConfig) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+func validateScopeClaims(ctx context.Context, repo port.Repository, orgID, tenantID string) error {
+	if repo == nil {
+		return fmt.Errorf("scope repository is not configured")
+	}
+
+	org, err := repo.GetOrganization(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	if org == nil {
+		return fmt.Errorf("invalid org_id in token")
+	}
+	if org.Status != "" && !strings.EqualFold(org.Status, "active") {
+		return fmt.Errorf("organization is not active")
+	}
+
+	tenant, err := repo.GetTenant(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	if tenant == nil {
+		return fmt.Errorf("invalid tenant_id in token")
+	}
+	if tenant.Status != "" && !strings.EqualFold(tenant.Status, "active") {
+		return fmt.Errorf("tenant is not active")
+	}
+	if tenant.OrgID != orgID {
+		return fmt.Errorf("tenant does not belong to org")
+	}
+
+	return nil
+}
+
+func errorsIsScopeInvalid(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "invalid org_id") ||
+		strings.Contains(msg, "invalid tenant_id") ||
+		strings.Contains(msg, "not active") ||
+		strings.Contains(msg, "does not belong to org") {
+		return true
+	}
+	// allow SQL no rows from custom repos as invalid scope
+	return err == sql.ErrNoRows
 }
 
 // writeErrorCode 带错误码的统一错误响应

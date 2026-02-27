@@ -7,16 +7,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"flowweave/internal/provider"
 )
 
 // Config OpenAI 兼容 API 配置
 type Config struct {
-	APIKey  string `json:"api_key"`
-	BaseURL string `json:"base_url"` // 默认 https://api.openai.com/v1
+	APIKey                     string `json:"api_key"`
+	BaseURL                    string `json:"base_url"` // 默认 https://api.openai.com/v1
+	ConnectTimeoutSeconds      int    `json:"connect_timeout_seconds"`
+	TLSHandshakeTimeoutSeconds int    `json:"tls_handshake_timeout_seconds"`
 }
 
 // Provider OpenAI 兼容的 LLM Provider
@@ -34,9 +38,27 @@ func New(config Config) *Provider {
 	// 移除末尾斜杠
 	config.BaseURL = strings.TrimRight(config.BaseURL, "/")
 
+	connectTimeout := time.Duration(config.ConnectTimeoutSeconds) * time.Second
+	if connectTimeout <= 0 {
+		connectTimeout = 30 * time.Second
+	}
+	tlsHandshakeTimeout := time.Duration(config.TLSHandshakeTimeoutSeconds) * time.Second
+	if tlsHandshakeTimeout <= 0 {
+		tlsHandshakeTimeout = 30 * time.Second
+	}
+
+	// Go 默认 Transport 的 TLS 握手超时为 10s，弱网下容易触发 handshake timeout。
+	// 这里改为可配置，并保留通过 ctx 控制请求生命周期。
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{
+		Timeout:   connectTimeout,
+		KeepAlive: 30 * time.Second,
+	}).DialContext
+	transport.TLSHandshakeTimeout = tlsHandshakeTimeout
+
 	return &Provider{
 		config: config,
-		client: &http.Client{},
+		client: &http.Client{Transport: transport},
 	}
 }
 

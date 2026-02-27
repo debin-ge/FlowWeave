@@ -129,7 +129,7 @@ func (s *Server) buildRouter() (http.Handler, error) {
 		Secret: s.config.JWTSecret,
 		Issuer: s.config.JWTIssuer,
 	}
-	authMW := authMiddleware(jwtCfg)
+	authMW := authMiddleware(jwtCfg, s.repo)
 
 	s.registerPublicRoutes(r, orgHandler, tenantHandler)
 	s.registerProtectedRoutes(r, authMW, workflowHandler, orgHandler, tenantHandler, ragEnabled)
