@@ -2,6 +2,7 @@ package echo
 
 import (
 	"context"
+	"fmt"
 
 	"flowweave/internal/domain/workflow/node/code"
 )
@@ -13,6 +14,7 @@ func (f *function) Name() string {
 }
 
 func (f *function) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+	fmt.Printf("Input is %+v", input)
 	return map[string]interface{}{
 		"result": input,
 	}, nil

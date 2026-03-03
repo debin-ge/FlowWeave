@@ -6,7 +6,7 @@
 # Optional local config files
 config/app.json
 config/*.local.json
-
+docs/
 examples/
 
 # ----- Build Artifacts -----
@@ -38,6 +38,9 @@ logs/
 *.swp
 *.swo
 *~
+.claude-flow/
+.swarm/
+AGENTS.md
 
 # ----- OS Files -----
 .DS_Store

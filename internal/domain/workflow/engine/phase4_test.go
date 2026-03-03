@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -31,8 +32,21 @@ func (f *failingFunction) Execute(ctx context.Context, input map[string]interfac
 	return nil, fmt.Errorf("simulated failure")
 }
 
+type iterationIdentityFunction struct{}
+
+func (f *iterationIdentityFunction) Name() string {
+	return "test.engine.iteration.identity.v1"
+}
+
+func (f *iterationIdentityFunction) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+	return map[string]interface{}{
+		"result": input["item"],
+	}, nil
+}
+
 func init() {
 	code.MustRegisterFunction(&failingFunction{})
+	code.MustRegisterFunction(&iterationIdentityFunction{})
 }
 
 // --- 错误策略：default-value ---
@@ -197,9 +211,51 @@ func TestIterationNode(t *testing.T) {
 				"data": {
 					"type": "iteration",
 					"title": "Process Names",
-					"iterator": ["start_1", "names"],
-					"output_variable": "processed",
-					"max_iterations": 50
+					"mode": "map",
+					"input": {
+						"value_selector": ["start_1", "names"]
+					},
+					"subgraph": {
+						"start": "iter_start",
+						"nodes": [
+							{
+								"id": "iter_start",
+								"data": {
+									"type": "iteration-start",
+									"title": "Iter Start"
+								}
+							},
+							{
+								"id": "func_1",
+								"data": {
+									"type": "func",
+									"title": "Wrap Name",
+									"function_ref": "flowweave.echo.v1",
+									"inputs": [
+										{"name": "name", "type": "string", "required": true, "value_selector": ["iter_1", "item"]}
+									],
+									"outputs": [
+										{"name": "result", "type": "object", "required": true}
+									]
+								}
+							}
+						],
+						"edges": [
+							{"source": "iter_start", "target": "func_1"}
+						],
+						"result_selector": ["func_1", "result"]
+					},
+					"concurrency": {
+						"max_concurrency": 2,
+						"order": "input-order"
+					},
+					"aggregate": {
+						"strategy": "collect"
+					},
+					"outputs": [
+						{"name": "results", "from": "aggregate.result"},
+						{"name": "meta", "from": "aggregate.meta"}
+					]
 				}
 			},
 			{
@@ -208,8 +264,8 @@ func TestIterationNode(t *testing.T) {
 					"type": "end",
 					"title": "End",
 					"outputs": [
-						{"variable": "count", "value_selector": ["iter_1", "count"]},
-						{"variable": "items", "value_selector": ["iter_1", "processed"]}
+						{"variable": "meta", "value_selector": ["iter_1", "meta"]},
+						{"variable": "items", "value_selector": ["iter_1", "results"]}
 					]
 				}
 			}
@@ -229,25 +285,442 @@ func TestIterationNode(t *testing.T) {
 		t.Fatalf("iteration workflow failed: %v", err)
 	}
 
-	count, ok := runResult.Outputs["count"]
+	meta, ok := runResult.Outputs["meta"]
 	if !ok {
-		t.Fatalf("expected count in runResult.Outputs, got %v", runResult.Outputs)
+		t.Fatalf("expected meta in runResult.Outputs, got %v", runResult.Outputs)
+	}
+	metaMap, ok := meta.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected meta map, got %T", meta)
 	}
 
-	// count 可能是 int 或 float64
-	var actual int
-	switch v := count.(type) {
+	success, ok := metaMap["success"]
+	if !ok {
+		t.Fatalf("expected meta.success, got %v", metaMap)
+	}
+	if success != 3 {
+		t.Fatalf("expected success=3, got %v", success)
+	}
+
+	items, ok := runResult.Outputs["items"].([]interface{})
+	if !ok {
+		t.Fatalf("expected items as []interface{}, got %T", runResult.Outputs["items"])
+	}
+	if len(items) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(items))
+	}
+
+	t.Logf("✅ Iteration node test passed: meta=%v, items=%v", meta, runResult.Outputs["items"])
+}
+
+func TestIterationNodeContinueErrorsToDownstream(t *testing.T) {
+	dsl := json.RawMessage(`{
+		"nodes": [
+			{
+				"id": "start_1",
+				"data": {
+					"type": "start",
+					"title": "Start",
+					"variables": [
+						{"variable": "names", "label": "Names", "type": "array[string]", "required": true}
+					]
+				}
+			},
+			{
+				"id": "iter_1",
+				"data": {
+					"type": "iteration",
+					"title": "Process With Continue",
+					"mode": "map",
+					"input": {
+						"value_selector": ["start_1", "names"]
+					},
+					"subgraph": {
+						"start": "iter_start",
+						"nodes": [
+							{
+								"id": "iter_start",
+								"data": {
+									"type": "iteration-start",
+									"title": "Iter Start"
+								}
+							},
+							{
+								"id": "func_1",
+								"data": {
+									"type": "func",
+									"title": "Missing Function",
+									"function_ref": "test.iteration.missing.v1",
+									"inputs": [
+										{"name": "name", "type": "string", "required": true, "value_selector": ["iter_1", "item"]}
+									],
+									"outputs": [
+										{"name": "result", "type": "string", "required": true}
+									]
+								}
+							}
+						],
+						"edges": [
+							{"source": "iter_start", "target": "func_1"}
+						],
+						"result_selector": ["func_1", "result"]
+					},
+					"aggregate": {
+						"strategy": "collect"
+					},
+					"on_item_error": "continue",
+					"outputs": [
+						{"name": "errors", "from": "aggregate.errors"},
+						{"name": "meta", "from": "aggregate.meta"}
+					]
+				}
+			},
+			{
+				"id": "end_1",
+				"data": {
+					"type": "end",
+					"title": "End",
+					"outputs": [
+						{"variable": "errors", "value_selector": ["iter_1", "errors"]},
+						{"variable": "meta", "value_selector": ["iter_1", "meta"]}
+					]
+				}
+			}
+		],
+		"edges": [
+			{"source": "start_1", "target": "iter_1"},
+			{"source": "iter_1", "target": "end_1"}
+		]
+	}`)
+
+	runner := workflow.NewWorkflowRunner(engine.DefaultConfig(), nil)
+	runResult, err := runner.RunSync(context.Background(), dsl, map[string]interface{}{
+		"names": []interface{}{"Alice", "Bob"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("iteration continue workflow failed: %v", err)
+	}
+
+	errorsOut, ok := runResult.Outputs["errors"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("expected errors as []map[string]interface{}, got %T", runResult.Outputs["errors"])
+	}
+	if len(errorsOut) != 2 {
+		t.Fatalf("expected 2 item errors, got %d (%v)", len(errorsOut), errorsOut)
+	}
+
+	meta, ok := runResult.Outputs["meta"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected meta as map, got %T", runResult.Outputs["meta"])
+	}
+	if meta["failed"] != 2 {
+		t.Fatalf("expected meta.failed=2, got %v", meta["failed"])
+	}
+	if meta["success"] != 0 {
+		t.Fatalf("expected meta.success=0, got %v", meta["success"])
+	}
+}
+
+func TestIterationNodeMergeRejected(t *testing.T) {
+	dsl := json.RawMessage(`{
+		"nodes": [
+			{
+				"id": "start_1",
+				"data": {
+					"type": "start",
+					"title": "Start",
+					"variables": [
+						{"variable": "items", "label": "Items", "type": "array[object]", "required": true}
+					]
+				}
+			},
+			{
+				"id": "iter_1",
+				"data": {
+					"type": "iteration",
+					"title": "Merge Conflict",
+					"mode": "map",
+					"input": {
+						"value_selector": ["start_1", "items"]
+					},
+					"subgraph": {
+						"start": "iter_start",
+						"nodes": [
+							{
+								"id": "iter_start",
+								"data": {
+									"type": "iteration-start",
+									"title": "Iter Start"
+								}
+							},
+							{
+								"id": "func_1",
+								"data": {
+									"type": "func",
+									"title": "Identity",
+									"function_ref": "test.engine.iteration.identity.v1",
+									"inputs": [
+										{"name": "item", "type": "object", "required": true, "value_selector": ["iter_1", "item"]}
+									],
+									"outputs": [
+										{"name": "result", "type": "object", "required": true}
+									]
+								}
+							}
+						],
+						"edges": [
+							{"source": "iter_start", "target": "func_1"}
+						],
+						"result_selector": ["func_1", "result"]
+					},
+					"aggregate": {
+						"strategy": "merge",
+						"merge": {"conflict": "error-on-conflict"}
+					},
+					"outputs": [
+						{"name": "merged", "from": "aggregate.result"}
+					]
+				}
+			},
+			{
+				"id": "end_1",
+				"data": {
+					"type": "end",
+					"title": "End",
+					"outputs": [
+						{"variable": "merged", "value_selector": ["iter_1", "merged"]}
+					]
+				}
+			}
+		],
+		"edges": [
+			{"source": "start_1", "target": "iter_1"},
+			{"source": "iter_1", "target": "end_1"}
+		]
+	}`)
+
+	runner := workflow.NewWorkflowRunner(engine.DefaultConfig(), nil)
+	_, err := runner.RunSync(context.Background(), dsl, map[string]interface{}{
+		"items": []interface{}{
+			map[string]interface{}{"k": "v1"},
+			map[string]interface{}{"k": "v2"},
+		},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected workflow error due to unsupported merge strategy")
+	}
+	if !strings.Contains(err.Error(), "ITERATION_AGGREGATE_INVALID") {
+		t.Fatalf("expected ITERATION_AGGREGATE_INVALID, got %v", err)
+	}
+}
+
+func TestIterationNodeReduceInlineSuccess(t *testing.T) {
+	dsl := json.RawMessage(`{
+		"nodes": [
+			{
+				"id": "start_1",
+				"data": {
+					"type": "start",
+					"title": "Start",
+					"variables": [
+						{"variable": "items", "label": "Items", "type": "array[number]", "required": true}
+					]
+				}
+			},
+			{
+				"id": "iter_1",
+				"data": {
+					"type": "iteration",
+					"title": "Reduce Missing Reducer",
+					"mode": "map",
+					"input": {
+						"value_selector": ["start_1", "items"]
+					},
+					"subgraph": {
+						"start": "iter_start",
+						"nodes": [
+							{
+								"id": "iter_start",
+								"data": {
+									"type": "iteration-start",
+									"title": "Iter Start"
+								}
+							},
+							{
+								"id": "func_1",
+								"data": {
+									"type": "func",
+									"title": "Identity Number",
+									"function_ref": "test.engine.iteration.identity.v1",
+									"inputs": [
+										{"name": "item", "type": "number", "required": true, "value_selector": ["iter_1", "item"]}
+									],
+									"outputs": [
+										{"name": "result", "type": "number", "required": true}
+									]
+								}
+							}
+						],
+						"edges": [
+							{"source": "iter_start", "target": "func_1"}
+						],
+						"result_selector": ["func_1", "result"]
+					},
+					"aggregate": {
+						"strategy": "reduce",
+						"reduce": {"acc_init": 0}
+					},
+					"outputs": [
+						{"name": "sum", "from": "aggregate.result"}
+					]
+				}
+			},
+			{
+				"id": "end_1",
+				"data": {
+					"type": "end",
+					"title": "End",
+					"outputs": [
+						{"variable": "sum", "value_selector": ["iter_1", "sum"]}
+					]
+				}
+			}
+		],
+		"edges": [
+			{"source": "start_1", "target": "iter_1"},
+			{"source": "iter_1", "target": "end_1"}
+		]
+	}`)
+
+	runner := workflow.NewWorkflowRunner(engine.DefaultConfig(), nil)
+	runResult, err := runner.RunSync(context.Background(), dsl, map[string]interface{}{
+		"items": []interface{}{1, 2, 3},
+	}, nil)
+	if err != nil {
+		t.Fatalf("reduce inline workflow failed: %v", err)
+	}
+	sum, ok := runResult.Outputs["sum"]
+	if !ok {
+		t.Fatalf("expected sum output, got %v", runResult.Outputs)
+	}
+	switch v := sum.(type) {
 	case float64:
-		actual = int(v)
+		if v != 6 {
+			t.Fatalf("expected sum=6, got %v", v)
+		}
 	case int:
-		actual = v
+		if v != 6 {
+			t.Fatalf("expected sum=6, got %v", v)
+		}
+	default:
+		t.Fatalf("unexpected sum type %T value %v", sum, sum)
+	}
+}
+
+func TestIterationNodeReduceJoinTextSuccess(t *testing.T) {
+	dsl := json.RawMessage(`{
+		"nodes": [
+			{
+				"id": "start_1",
+				"data": {
+					"type": "start",
+					"title": "Start",
+					"variables": [
+						{"variable": "orders", "label": "Orders", "type": "array[object]", "required": true}
+					]
+				}
+			},
+			{
+				"id": "iter_1",
+				"data": {
+					"type": "iteration",
+					"title": "Reduce Join Text",
+					"mode": "map",
+					"input": {
+						"value_selector": ["start_1", "orders"]
+					},
+					"context": {
+						"item_key": "order",
+						"index_key": "idx"
+					},
+					"subgraph": {
+						"start": "iter_start",
+						"nodes": [
+							{
+								"id": "iter_start",
+								"data": {
+									"type": "iteration-start",
+									"title": "Iter Start"
+								}
+							},
+							{
+								"id": "enrich_order",
+								"data": {
+									"type": "func",
+									"title": "Identity",
+									"function_ref": "flowweave.echo.v1",
+									"inputs": [
+										{"name": "item", "type": "object", "required": true, "value_selector": ["iter_1", "order"]}
+									],
+									"outputs": [
+										{"name": "result", "type": "object", "required": true}
+									]
+								}
+							}
+						],
+						"edges": [
+							{"source": "iter_start", "target": "enrich_order"}
+						],
+						"result_selector": ["enrich_order", "result"]
+					},
+					"aggregate": {
+						"strategy": "reduce",
+						"reduce": {
+							"acc_init": {"text": ""}
+						}
+					},
+					"outputs": [
+						{"name": "reduced", "from": "aggregate.result"}
+					],
+					"on_item_error": "continue"
+				}
+			},
+			{
+				"id": "end_1",
+				"data": {
+					"type": "end",
+					"title": "End",
+					"outputs": [
+						{"variable": "reduced", "value_selector": ["iter_1", "reduced"]}
+					]
+				}
+			}
+		],
+		"edges": [
+			{"source": "start_1", "target": "iter_1"},
+			{"source": "iter_1", "target": "end_1"}
+		]
+	}`)
+
+	runner := workflow.NewWorkflowRunner(engine.DefaultConfig(), nil)
+	runResult, err := runner.RunSync(context.Background(), dsl, map[string]interface{}{
+		"orders": []interface{}{
+			map[string]interface{}{"text": "测试一下"},
+			map[string]interface{}{"text": "第二条数据"},
+			map[string]interface{}{"text": "第三条数据"},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("reduce join text workflow failed: %v", err)
 	}
 
-	if actual != 3 {
-		t.Fatalf("expected count=3, got %v (type %T)", count, count)
+	reduced, ok := runResult.Outputs["reduced"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected reduced as map, got %T", runResult.Outputs["reduced"])
 	}
-
-	t.Logf("✅ Iteration node test passed: count=%v, items=%v", count, runResult.Outputs["items"])
+	if reduced["text"] != "测试一下,第二条数据,第三条数据" {
+		t.Fatalf("unexpected reduced text: %v", reduced["text"])
+	}
 }
 
 // --- 命令通道：Abort ---
