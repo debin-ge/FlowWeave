@@ -9,6 +9,7 @@ import (
 	_ "flowweave/internal/domain/workflow/node/ifelse"
 	_ "flowweave/internal/domain/workflow/node/iteration"
 	_ "flowweave/internal/domain/workflow/node/llm"
+	_ "flowweave/internal/domain/workflow/node/loop"
 	_ "flowweave/internal/domain/workflow/node/start"
 	_ "flowweave/internal/domain/workflow/node/template"
 )

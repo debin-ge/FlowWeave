@@ -44,9 +44,49 @@ func (f *iterationIdentityFunction) Execute(ctx context.Context, input map[strin
 	}, nil
 }
 
+type loopStepFunction struct{}
+
+func (f *loopStepFunction) Name() string {
+	return "test.engine.loop.step.v1"
+}
+
+func (f *loopStepFunction) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+	text, _ := input["text"].(string)
+	round := 0
+	switch n := input["round"].(type) {
+	case int:
+		round = n
+	case int64:
+		round = int(n)
+	case float64:
+		round = int(n)
+	}
+	return map[string]interface{}{
+		"next_text":  fmt.Sprintf("%s:r%d", text, round+1),
+		"over_limit": round < 1,
+	}, nil
+}
+
+type loopSlowStopFunction struct{}
+
+func (f *loopSlowStopFunction) Name() string {
+	return "test.engine.loop.slow_stop.v1"
+}
+
+func (f *loopSlowStopFunction) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+	time.Sleep(20 * time.Millisecond)
+	number := input["number"]
+	return map[string]interface{}{
+		"next_number":   number,
+		"continue_loop": false,
+	}, nil
+}
+
 func init() {
 	code.MustRegisterFunction(&failingFunction{})
 	code.MustRegisterFunction(&iterationIdentityFunction{})
+	code.MustRegisterFunction(&loopStepFunction{})
+	code.MustRegisterFunction(&loopSlowStopFunction{})
 }
 
 // --- 错误策略：default-value ---
@@ -720,6 +760,469 @@ func TestIterationNodeReduceJoinTextSuccess(t *testing.T) {
 	}
 	if reduced["text"] != "测试一下,第二条数据,第三条数据" {
 		t.Fatalf("unexpected reduced text: %v", reduced["text"])
+	}
+}
+
+func TestLoopNodeWhileSuccess(t *testing.T) {
+	dsl := json.RawMessage(`{
+		"nodes": [
+			{
+				"id": "start_1",
+				"data": {
+					"type": "start",
+					"title": "Start",
+					"variables": [
+						{"variable": "input_text", "label": "Input", "type": "string", "required": true}
+					]
+				}
+			},
+			{
+				"id": "loop_1",
+				"data": {
+					"type": "loop",
+					"title": "Loop Summary",
+					"mode": "while",
+					"max_rounds": 3,
+					"state_init": [
+						{"name": "current_text", "value_selector": ["start_1", "input_text"], "required": true},
+						{"name": "round", "default": 0, "required": true}
+					],
+					"subgraph": {
+						"start": "loop_start",
+						"nodes": [
+							{
+								"id": "loop_start",
+								"data": {
+									"type": "loop-start",
+									"title": "Loop Start"
+								}
+							},
+							{
+								"id": "step_1",
+								"data": {
+									"type": "func",
+									"title": "Loop Step",
+									"function_ref": "test.engine.loop.step.v1",
+									"inputs": [
+										{"name": "text", "type": "string", "required": true, "value_selector": ["loop_1", "current_text"]},
+										{"name": "round", "type": "number", "required": true, "value_selector": ["loop_1", "round"]}
+									],
+									"outputs": [
+										{"name": "next_text", "type": "string", "required": true},
+										{"name": "over_limit", "type": "boolean", "required": true}
+									]
+								}
+							}
+						],
+						"edges": [
+							{"source": "loop_start", "target": "step_1"}
+						],
+						"continue_selector": ["step_1", "over_limit"]
+					},
+					"state_update": [
+						{"name": "current_text", "op": "assign", "value_selector": ["step_1", "next_text"], "required": true},
+						{"name": "round", "op": "inc", "value": 1}
+					],
+					"continue_condition": {
+						"logical_operator": "and",
+						"conditions": [
+							{"variable_selector": ["loop_internal", "continue_raw"], "comparison_operator": "is", "value": "true"},
+							{"variable_selector": ["loop_internal", "round_lt_max"], "comparison_operator": "is", "value": "true"}
+						]
+					},
+					"outputs": [
+						{"name": "final_text", "from": "loop.state.current_text", "required": true},
+						{"name": "rounds", "from": "loop.meta.rounds", "required": true},
+						{"name": "terminated_by", "from": "loop.meta.terminated_by", "required": true}
+					]
+				}
+			},
+			{
+				"id": "end_1",
+				"data": {
+					"type": "end",
+					"title": "End",
+					"outputs": [
+						{"variable": "summary", "value_selector": ["loop_1", "final_text"]},
+						{"variable": "rounds", "value_selector": ["loop_1", "rounds"]},
+						{"variable": "terminated_by", "value_selector": ["loop_1", "terminated_by"]}
+					]
+				}
+			}
+		],
+		"edges": [
+			{"source": "start_1", "target": "loop_1"},
+			{"source": "loop_1", "target": "end_1"}
+		]
+	}`)
+
+	runner := workflow.NewWorkflowRunner(engine.DefaultConfig(), nil)
+	runResult, err := runner.RunSync(context.Background(), dsl, map[string]interface{}{
+		"input_text": "seed",
+	}, nil)
+	if err != nil {
+		t.Fatalf("loop workflow failed: %v", err)
+	}
+
+	if runResult.Outputs["summary"] != "seed:r1:r2" {
+		t.Fatalf("unexpected summary: %v", runResult.Outputs["summary"])
+	}
+	rounds := 0
+	switch v := runResult.Outputs["rounds"].(type) {
+	case int:
+		rounds = v
+	case int64:
+		rounds = int(v)
+	case float64:
+		rounds = int(v)
+	default:
+		t.Fatalf("unexpected rounds type: %T", runResult.Outputs["rounds"])
+	}
+	if rounds != 2 {
+		t.Fatalf("expected rounds=2, got %v", runResult.Outputs["rounds"])
+	}
+	if runResult.Outputs["terminated_by"] != "condition-false" {
+		t.Fatalf("unexpected terminated_by: %v", runResult.Outputs["terminated_by"])
+	}
+}
+
+func TestLoopPrimeJudgeIncrementUntilPrime(t *testing.T) {
+	dsl := json.RawMessage(`{
+		"nodes": [
+			{
+				"id": "start_1",
+				"data": {
+					"type": "start",
+					"title": "Start",
+					"variables": [
+						{"variable": "n", "label": "Number", "type": "number", "required": true}
+					]
+				}
+			},
+			{
+				"id": "loop_1",
+				"data": {
+					"type": "loop",
+					"title": "Prime Loop",
+					"mode": "while",
+					"max_rounds": 10,
+					"state_init": [
+						{"name": "current_number", "value_selector": ["start_1", "n"], "required": true},
+						{"name": "round", "default": 0, "required": true}
+					],
+					"subgraph": {
+						"start": "loop_start",
+						"nodes": [
+							{
+								"id": "loop_start",
+								"data": {
+									"type": "loop-start",
+									"title": "Loop Start"
+								}
+							},
+							{
+								"id": "judge_1",
+								"data": {
+									"type": "func",
+									"title": "Prime Judge",
+									"function_ref": "math.prime_judge.v1",
+									"inputs": [
+										{"name": "number", "type": "number", "required": true, "value_selector": ["loop_1", "current_number"]}
+									],
+									"outputs": [
+										{"name": "is_prime", "type": "boolean", "required": true},
+										{"name": "continue_loop", "type": "boolean", "required": true},
+										{"name": "next_number", "type": "number", "required": true}
+									]
+								}
+							}
+						],
+						"edges": [
+							{"source": "loop_start", "target": "judge_1"}
+						],
+						"continue_selector": ["judge_1", "continue_loop"]
+					},
+					"state_update": [
+						{"name": "current_number", "op": "assign", "value_selector": ["judge_1", "next_number"], "required": true},
+						{"name": "round", "op": "inc", "value": 1}
+					],
+					"continue_condition": {
+						"logical_operator": "and",
+						"conditions": [
+							{"variable_selector": ["loop_internal", "continue_raw"], "comparison_operator": "is", "value": "true"},
+							{"variable_selector": ["loop_internal", "round_lt_max"], "comparison_operator": "is", "value": "true"}
+						]
+					},
+					"outputs": [
+						{"name": "final_number", "from": "loop.state.current_number", "required": true},
+						{"name": "rounds", "from": "loop.meta.rounds", "required": true},
+						{"name": "terminated_by", "from": "loop.meta.terminated_by", "required": true}
+					]
+				}
+			},
+			{
+				"id": "end_1",
+				"data": {
+					"type": "end",
+					"title": "End",
+					"outputs": [
+						{"variable": "final_number", "value_selector": ["loop_1", "final_number"]},
+						{"variable": "rounds", "value_selector": ["loop_1", "rounds"]},
+						{"variable": "terminated_by", "value_selector": ["loop_1", "terminated_by"]}
+					]
+				}
+			}
+		],
+		"edges": [
+			{"source": "start_1", "target": "loop_1"},
+			{"source": "loop_1", "target": "end_1"}
+		]
+	}`)
+
+	runner := workflow.NewWorkflowRunner(engine.DefaultConfig(), nil)
+	runResult, err := runner.RunSync(context.Background(), dsl, map[string]interface{}{"n": 8}, nil)
+	if err != nil {
+		t.Fatalf("prime loop workflow failed: %v", err)
+	}
+
+	finalNumber := 0
+	switch v := runResult.Outputs["final_number"].(type) {
+	case int:
+		finalNumber = v
+	case int64:
+		finalNumber = int(v)
+	case float64:
+		finalNumber = int(v)
+	default:
+		t.Fatalf("unexpected final_number type: %T", runResult.Outputs["final_number"])
+	}
+	if finalNumber != 11 {
+		t.Fatalf("expected final_number=11, got %v", runResult.Outputs["final_number"])
+	}
+
+	rounds := 0
+	switch v := runResult.Outputs["rounds"].(type) {
+	case int:
+		rounds = v
+	case int64:
+		rounds = int(v)
+	case float64:
+		rounds = int(v)
+	default:
+		t.Fatalf("unexpected rounds type: %T", runResult.Outputs["rounds"])
+	}
+	if rounds != 4 {
+		t.Fatalf("expected rounds=4, got %v", runResult.Outputs["rounds"])
+	}
+
+	if runResult.Outputs["terminated_by"] != "condition-false" {
+		t.Fatalf("unexpected terminated_by: %v", runResult.Outputs["terminated_by"])
+	}
+}
+
+func TestLoopPrimeJudgeTerminatedByMaxRounds(t *testing.T) {
+	dsl := json.RawMessage(`{
+		"nodes": [
+			{
+				"id": "start_1",
+				"data": {
+					"type": "start",
+					"title": "Start",
+					"variables": [
+						{"variable": "n", "label": "Number", "type": "number", "required": true}
+					]
+				}
+			},
+			{
+				"id": "loop_1",
+				"data": {
+					"type": "loop",
+					"title": "Prime Loop",
+					"mode": "while",
+					"max_rounds": 10,
+					"state_init": [
+						{"name": "current_number", "value_selector": ["start_1", "n"], "required": true},
+						{"name": "round", "default": 0, "required": true}
+					],
+					"subgraph": {
+						"start": "loop_start",
+						"nodes": [
+							{
+								"id": "loop_start",
+								"data": {
+									"type": "loop-start",
+									"title": "Loop Start"
+								}
+							},
+							{
+								"id": "judge_1",
+								"data": {
+									"type": "func",
+									"title": "Prime Judge",
+									"function_ref": "math.prime_judge.v1",
+									"inputs": [
+										{"name": "number", "type": "number", "required": true, "value_selector": ["loop_1", "current_number"]}
+									],
+									"outputs": [
+										{"name": "is_prime", "type": "boolean", "required": true},
+										{"name": "continue_loop", "type": "boolean", "required": true},
+										{"name": "next_number", "type": "number", "required": true}
+									]
+								}
+							}
+						],
+						"edges": [
+							{"source": "loop_start", "target": "judge_1"}
+						],
+						"continue_selector": ["judge_1", "continue_loop"]
+					},
+					"state_update": [
+						{"name": "current_number", "op": "assign", "value_selector": ["judge_1", "next_number"], "required": true},
+						{"name": "round", "op": "inc", "value": 1}
+					],
+					"continue_condition": {
+						"logical_operator": "and",
+						"conditions": [
+							{"variable_selector": ["loop_internal", "continue_raw"], "comparison_operator": "is", "value": "true"},
+							{"variable_selector": ["loop_internal", "round_lt_max"], "comparison_operator": "is", "value": "true"}
+						]
+					},
+					"outputs": [
+						{"name": "final_number", "from": "loop.state.current_number", "required": true},
+						{"name": "rounds", "from": "loop.meta.rounds", "required": true},
+						{"name": "terminated_by", "from": "loop.meta.terminated_by", "required": true}
+					]
+				}
+			},
+			{
+				"id": "end_1",
+				"data": {
+					"type": "end",
+					"title": "End",
+					"outputs": [
+						{"variable": "final_number", "value_selector": ["loop_1", "final_number"]},
+						{"variable": "rounds", "value_selector": ["loop_1", "rounds"]},
+						{"variable": "terminated_by", "value_selector": ["loop_1", "terminated_by"]}
+					]
+				}
+			}
+		],
+		"edges": [
+			{"source": "start_1", "target": "loop_1"},
+			{"source": "loop_1", "target": "end_1"}
+		]
+	}`)
+
+	runner := workflow.NewWorkflowRunner(engine.DefaultConfig(), nil)
+	runResult, err := runner.RunSync(context.Background(), dsl, map[string]interface{}{"n": 114}, nil)
+	if err != nil {
+		t.Fatalf("prime loop workflow failed: %v", err)
+	}
+
+	if runResult.Outputs["terminated_by"] != "max-rounds" {
+		t.Fatalf("expected terminated_by=max-rounds, got %v", runResult.Outputs["terminated_by"])
+	}
+}
+
+func TestLoopTerminatedByMaxDurationPrecedence(t *testing.T) {
+	dsl := json.RawMessage(`{
+		"nodes": [
+			{
+				"id": "start_1",
+				"data": {
+					"type": "start",
+					"title": "Start",
+					"variables": [
+						{"variable": "n", "label": "Number", "type": "number", "required": true}
+					]
+				}
+			},
+			{
+				"id": "loop_1",
+				"data": {
+					"type": "loop",
+					"title": "Duration Loop",
+					"mode": "while",
+					"max_rounds": 10,
+					"max_duration_ms": 1,
+					"state_init": [
+						{"name": "current_number", "value_selector": ["start_1", "n"], "required": true},
+						{"name": "round", "default": 0, "required": true}
+					],
+					"subgraph": {
+						"start": "loop_start",
+						"nodes": [
+							{
+								"id": "loop_start",
+								"data": {
+									"type": "loop-start",
+									"title": "Loop Start"
+								}
+							},
+							{
+								"id": "step_1",
+								"data": {
+									"type": "func",
+									"title": "Slow Stop",
+									"function_ref": "test.engine.loop.slow_stop.v1",
+									"inputs": [
+										{"name": "number", "type": "number", "required": true, "value_selector": ["loop_1", "current_number"]}
+									],
+									"outputs": [
+										{"name": "next_number", "type": "number", "required": true},
+										{"name": "continue_loop", "type": "boolean", "required": true}
+									]
+								}
+							}
+						],
+						"edges": [
+							{"source": "loop_start", "target": "step_1"}
+						],
+						"continue_selector": ["step_1", "continue_loop"]
+					},
+					"state_update": [
+						{"name": "current_number", "op": "assign", "value_selector": ["step_1", "next_number"], "required": true},
+						{"name": "round", "op": "inc", "value": 1}
+					],
+					"continue_condition": {
+						"logical_operator": "and",
+						"conditions": [
+							{"variable_selector": ["loop_internal", "continue_raw"], "comparison_operator": "is", "value": "true"},
+							{"variable_selector": ["loop_internal", "round_lt_max"], "comparison_operator": "is", "value": "true"}
+						]
+					},
+					"outputs": [
+						{"name": "rounds", "from": "loop.meta.rounds", "required": true},
+						{"name": "terminated_by", "from": "loop.meta.terminated_by", "required": true}
+					]
+				}
+			},
+			{
+				"id": "end_1",
+				"data": {
+					"type": "end",
+					"title": "End",
+					"outputs": [
+						{"variable": "rounds", "value_selector": ["loop_1", "rounds"]},
+						{"variable": "terminated_by", "value_selector": ["loop_1", "terminated_by"]}
+					]
+				}
+			}
+		],
+		"edges": [
+			{"source": "start_1", "target": "loop_1"},
+			{"source": "loop_1", "target": "end_1"}
+		]
+	}`)
+
+	runner := workflow.NewWorkflowRunner(engine.DefaultConfig(), nil)
+	runResult, err := runner.RunSync(context.Background(), dsl, map[string]interface{}{"n": 8}, nil)
+	if err != nil {
+		t.Fatalf("duration loop workflow failed: %v", err)
+	}
+
+	if runResult.Outputs["terminated_by"] != "max-duration" {
+		t.Fatalf("expected terminated_by=max-duration, got %v", runResult.Outputs["terminated_by"])
 	}
 }
 

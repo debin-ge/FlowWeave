@@ -9,6 +9,8 @@
 - [功能文档](./FEATURES.md)
 - [使用文档](./USAGE.md)
 - [部署文档](./DEPLOYMENT.md)
+- [Loop Node PRD V1](./PRD_LOOP_NODE_V1.md)
+- [Loop Node TDD V1](./TDD_LOOP_NODE_V1.md)
 
 ## 建议阅读顺序
 
