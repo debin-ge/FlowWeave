@@ -23,17 +23,23 @@ type WorkflowHandler struct {
 	repo       port.Repository
 	runner     *workflow.WorkflowRunner
 	runTimeout time.Duration
+	runInput   RunInputConfig
 }
 
 // NewWorkflowHandler 创建处理器
-func NewWorkflowHandler(repo port.Repository, runner *workflow.WorkflowRunner, runTimeout time.Duration) *WorkflowHandler {
+func NewWorkflowHandler(repo port.Repository, runner *workflow.WorkflowRunner, runTimeout time.Duration, runInput RunInputConfig) *WorkflowHandler {
 	if runner == nil {
 		runner = workflow.NewWorkflowRunner(engine.DefaultConfig(), nil)
 	}
 	if runTimeout <= 0 {
 		runTimeout = 5 * time.Minute
 	}
-	return &WorkflowHandler{repo: repo, runner: runner, runTimeout: runTimeout}
+	return &WorkflowHandler{
+		repo:       repo,
+		runner:     runner,
+		runTimeout: runTimeout,
+		runInput:   normalizeRunInputConfig(runInput),
+	}
 }
 
 // RegisterRoutes 注册路由
@@ -245,9 +251,10 @@ func (h *WorkflowHandler) RunWorkflowAsync(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	var req runWorkflowRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		req.Inputs = make(map[string]interface{})
+	req, err := parseRunWorkflowRequest(r, h.runInput)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	if req.ConversationID != "" {
@@ -301,9 +308,10 @@ func (h *WorkflowHandler) RunWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. 解析输入
-	var req runWorkflowRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		req.Inputs = make(map[string]interface{})
+	req, err := parseRunWorkflowRequest(r, h.runInput)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	// 3. 会话归属写校验
@@ -431,9 +439,10 @@ func (h *WorkflowHandler) RunWorkflowStream(w http.ResponseWriter, r *http.Reque
 	}
 
 	// 2. 解析输入
-	var req runWorkflowRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		req.Inputs = make(map[string]interface{})
+	req, err := parseRunWorkflowRequest(r, h.runInput)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	// 3. 会话归属写校验

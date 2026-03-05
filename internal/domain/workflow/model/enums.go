@@ -20,6 +20,7 @@ const (
 	NodeTypeLoop               NodeType = "loop"
 	NodeTypeLoopStart          NodeType = "loop-start"
 	NodeTypeLoopEnd            NodeType = "loop-end"
+	NodeTypeASR                NodeType = "asr"
 	NodeTypeParameterExtractor NodeType = "parameter-extractor"
 	NodeTypeVariableAssigner   NodeType = "assigner"
 	NodeTypeDocumentExtractor  NodeType = "document-extractor"

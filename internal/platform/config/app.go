@@ -25,6 +25,7 @@ type AppConfig struct {
 	OpenAI    OpenAIConfig   `json:"openai"`
 	Summary   SummaryConfig  `json:"summary"`
 	Gateway   GatewayConfig  `json:"gateway"`
+	ASR       ASRConfig      `json:"asr"`
 	RAG       rag.Config     `json:"rag"`
 }
 
@@ -89,6 +90,22 @@ type GatewayConfig struct {
 	MinRecentTurns    int     `json:"min_recent_turns"`
 }
 
+type ASRConfig struct {
+	TempDir            string           `json:"temp_dir"`
+	MaxAudioMB         int              `json:"max_audio_mb"`
+	MaxBase64Chars     int              `json:"max_base64_chars"`
+	URLFetchTimeoutMS  int              `json:"url_fetch_timeout_ms"`
+	TempFileTTLMinutes int              `json:"temp_file_ttl_minutes"`
+	Tencent            TencentASRConfig `json:"tencent"`
+}
+
+type TencentASRConfig struct {
+	AppID      string `json:"app_id"`
+	SecretID   string `json:"secret_id"`
+	SecretKey  string `json:"secret_key"`
+	EngineType string `json:"engine_type"`
+}
+
 // Default 返回默认配置。
 func Default() *AppConfig {
 	ragCfg := rag.DefaultConfig()
@@ -136,6 +153,16 @@ func Default() *AppConfig {
 			ContextWindowSize: 128000,
 			ThresholdRatio:    0.70,
 			MinRecentTurns:    4,
+		},
+		ASR: ASRConfig{
+			TempDir:            "/tmp/flowweave-asr",
+			MaxAudioMB:         50,
+			MaxBase64Chars:     12 * 1024 * 1024,
+			URLFetchTimeoutMS:  30000,
+			TempFileTTLMinutes: 120,
+			Tencent: TencentASRConfig{
+				EngineType: "16k_zh",
+			},
 		},
 		RAG: *ragCfg,
 	}
@@ -223,6 +250,16 @@ func (c *AppConfig) applyEnv() {
 	applyFloat64("COMPRESS_THRESHOLD_RATIO", &c.Gateway.ThresholdRatio)
 	applyInt("COMPRESS_MIN_RECENT_TURNS", &c.Gateway.MinRecentTurns)
 
+	applyString("ASR_TEMP_DIR", &c.ASR.TempDir)
+	applyInt("ASR_MAX_AUDIO_MB", &c.ASR.MaxAudioMB)
+	applyInt("ASR_MAX_BASE64_CHARS", &c.ASR.MaxBase64Chars)
+	applyInt("ASR_URL_FETCH_TIMEOUT_MS", &c.ASR.URLFetchTimeoutMS)
+	applyInt("ASR_TEMP_FILE_TTL_MINUTES", &c.ASR.TempFileTTLMinutes)
+	applyString("TENCENT_ASR_APP_ID", &c.ASR.Tencent.AppID)
+	applyString("TENCENT_ASR_SECRET_ID", &c.ASR.Tencent.SecretID)
+	applyString("TENCENT_ASR_SECRET_KEY", &c.ASR.Tencent.SecretKey)
+	applyString("TENCENT_ASR_ENGINE_TYPE", &c.ASR.Tencent.EngineType)
+
 	// RAG 环境变量
 	applyString("OPENSEARCH_URL", &c.RAG.OpenSearchURL)
 	applyString("OPENSEARCH_USERNAME", &c.RAG.OpenSearchUsername)
@@ -268,6 +305,24 @@ func (c *AppConfig) normalize() {
 	}
 	if c.Gateway.Model == "" {
 		c.Gateway.Model = c.Summary.Model
+	}
+	if c.ASR.TempDir == "" {
+		c.ASR.TempDir = "/tmp/flowweave-asr"
+	}
+	if c.ASR.MaxAudioMB <= 0 {
+		c.ASR.MaxAudioMB = 50
+	}
+	if c.ASR.MaxBase64Chars <= 0 {
+		c.ASR.MaxBase64Chars = 12 * 1024 * 1024
+	}
+	if c.ASR.URLFetchTimeoutMS <= 0 {
+		c.ASR.URLFetchTimeoutMS = 30000
+	}
+	if c.ASR.TempFileTTLMinutes <= 0 {
+		c.ASR.TempFileTTLMinutes = 120
+	}
+	if c.ASR.Tencent.EngineType == "" {
+		c.ASR.Tencent.EngineType = "16k_zh"
 	}
 }
 

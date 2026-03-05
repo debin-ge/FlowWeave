@@ -438,7 +438,7 @@ func (r *Repository) CreateRun(ctx context.Context, run *WorkflowRun) error {
 func (r *Repository) GetRun(ctx context.Context, id string) (*WorkflowRun, error) {
 	run := &WorkflowRun{}
 	var orgID, tenantID sql.NullString
-	query := `SELECT id, workflow_id, COALESCE(org_id::text,''), COALESCE(tenant_id::text,''), conversation_id, status, COALESCE(worker_id,''), retry_count, inputs, outputs, error, total_tokens, total_steps, elapsed_ms, queued_at, picked_at, started_at, finished_at
+	query := `SELECT id, workflow_id, COALESCE(org_id::text,''), COALESCE(tenant_id::text,''), COALESCE(conversation_id,''), status, COALESCE(worker_id,''), retry_count, COALESCE(inputs,'{}'::jsonb), COALESCE(outputs,'{}'::jsonb), COALESCE(error,''), total_tokens, total_steps, elapsed_ms, queued_at, picked_at, started_at, finished_at
 		 FROM workflow_runs WHERE id = $1`
 	args := []interface{}{id}
 	if scope := scopeFromContext(ctx); scope != nil {
@@ -490,8 +490,8 @@ func (r *Repository) ClaimNextQueuedRun(ctx context.Context, workerID string) (*
 	FROM picked
 	WHERE wr.id = picked.id
 	RETURNING wr.id, wr.workflow_id, COALESCE(wr.org_id::text,''), COALESCE(wr.tenant_id::text,''),
-	          wr.conversation_id, wr.status, COALESCE(wr.worker_id,''), wr.retry_count,
-	          wr.inputs, wr.outputs, wr.error, wr.total_tokens, wr.total_steps, wr.elapsed_ms,
+	          COALESCE(wr.conversation_id,''), wr.status, COALESCE(wr.worker_id,''), wr.retry_count,
+	          COALESCE(wr.inputs,'{}'::jsonb), COALESCE(wr.outputs,'{}'::jsonb), COALESCE(wr.error,''), wr.total_tokens, wr.total_steps, wr.elapsed_ms,
 	          wr.queued_at, wr.picked_at, wr.started_at, wr.finished_at`
 
 	err := r.db.QueryRowContext(ctx, query, RunStatusQueued, RunStatusRunning, workerID).Scan(
@@ -546,7 +546,7 @@ func (r *Repository) ListRuns(ctx context.Context, workflowID string, page, page
 	whereClause := "WHERE " + strings.Join(where, " AND ")
 
 	query := fmt.Sprintf(
-		`SELECT id, workflow_id, COALESCE(org_id::text,''), COALESCE(tenant_id::text,''), conversation_id, status, COALESCE(worker_id,''), retry_count, inputs, outputs, error, total_tokens, total_steps, elapsed_ms, queued_at, picked_at, started_at, finished_at
+		`SELECT id, workflow_id, COALESCE(org_id::text,''), COALESCE(tenant_id::text,''), COALESCE(conversation_id,''), status, COALESCE(worker_id,''), retry_count, COALESCE(inputs,'{}'::jsonb), COALESCE(outputs,'{}'::jsonb), COALESCE(error,''), total_tokens, total_steps, elapsed_ms, queued_at, picked_at, started_at, finished_at
 		 FROM workflow_runs %s ORDER BY started_at DESC LIMIT $%d OFFSET $%d`,
 		whereClause, argIdx, argIdx+1,
 	)

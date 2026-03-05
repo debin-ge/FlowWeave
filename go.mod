@@ -15,12 +15,14 @@ require (
 	github.com/nguyenthenguyen/docx v0.0.0-20230621112118-9c8e795a11db
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/samber/slog-zap/v2 v2.6.3
+	github.com/tencentcloud/tencentcloud-speech-sdk-go v1.0.19
 	go.uber.org/zap v1.27.1
 )
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
+	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/samber/lo v1.52.0 // indirect
 	github.com/samber/slog-common v0.20.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect

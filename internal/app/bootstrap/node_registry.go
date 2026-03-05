@@ -3,6 +3,7 @@ package bootstrap
 import (
 	// 核心节点注册
 	_ "flowweave/internal/domain/workflow/node/answer"
+	_ "flowweave/internal/domain/workflow/node/asr"
 	_ "flowweave/internal/domain/workflow/node/code"
 	_ "flowweave/internal/domain/workflow/node/end"
 	_ "flowweave/internal/domain/workflow/node/httprequest"

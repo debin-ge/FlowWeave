@@ -103,6 +103,7 @@ func main() {
 		cfg.OpenAI.ConnectTimeoutSeconds,
 		cfg.OpenAI.TLSHandshakeTimeoutSeconds,
 	)
+	initASRProviders(cfg)
 
 	memCoord := initMemory(db, cfg)
 	runner := workflow.NewWorkflowRunner(engineConfig, memCoord)
@@ -121,6 +122,8 @@ func main() {
 	serverConfig.RunTimeout = time.Duration(cfg.Server.RunTimeoutSeconds) * time.Second
 	serverConfig.JWTSecret = cfg.Auth.JWTSecret
 	serverConfig.JWTIssuer = cfg.Auth.JWTIssuer
+	serverConfig.ASRTempDir = cfg.ASR.TempDir
+	serverConfig.ASRMaxAudioMB = cfg.ASR.MaxAudioMB
 	server := api.NewServer(serverConfig, repo, runner)
 
 	ragCfg := &cfg.RAG
@@ -216,6 +219,22 @@ func main() {
 
 func initLLMProviders(apiKey, baseURL string, connectTimeoutSeconds, tlsHandshakeTimeoutSeconds int) {
 	bootstrap.RegisterLLMProviders(apiKey, baseURL, connectTimeoutSeconds, tlsHandshakeTimeoutSeconds)
+}
+
+func initASRProviders(cfg *config.AppConfig) {
+	if cfg == nil {
+		return
+	}
+	bootstrap.RegisterASRProviders(
+		cfg.ASR.TempDir,
+		cfg.ASR.MaxAudioMB,
+		cfg.ASR.MaxBase64Chars,
+		cfg.ASR.URLFetchTimeoutMS,
+		cfg.ASR.Tencent.AppID,
+		cfg.ASR.Tencent.SecretID,
+		cfg.ASR.Tencent.SecretKey,
+		cfg.ASR.Tencent.EngineType,
+	)
 }
 
 func initMemory(db *sql.DB, cfg *config.AppConfig) *memory.Coordinator {

@@ -18,23 +18,27 @@ import (
 
 // ServerConfig 服务配置
 type ServerConfig struct {
-	Host         string
-	Port         int
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
-	RunTimeout   time.Duration // 工作流执行超时（同步/流式）
-	JWTSecret    string        // JWT 签名密钥（必填）
-	JWTIssuer    string        // JWT 签发者（可选）
+	Host          string
+	Port          int
+	ReadTimeout   time.Duration
+	WriteTimeout  time.Duration
+	RunTimeout    time.Duration // 工作流执行超时（同步/流式）
+	JWTSecret     string        // JWT 签名密钥（必填）
+	JWTIssuer     string        // JWT 签发者（可选）
+	ASRTempDir    string        // ASR multipart 文件暂存目录
+	ASRMaxAudioMB int           // ASR 上传文件大小上限
 }
 
 // DefaultServerConfig 默认配置
 func DefaultServerConfig() *ServerConfig {
 	return &ServerConfig{
-		Host:         "0.0.0.0",
-		Port:         8080,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 10 * time.Minute, // SSE 需要较长写超时
-		RunTimeout:   5 * time.Minute,
+		Host:          "0.0.0.0",
+		Port:          8080,
+		ReadTimeout:   30 * time.Second,
+		WriteTimeout:  10 * time.Minute, // SSE 需要较长写超时
+		RunTimeout:    5 * time.Minute,
+		ASRTempDir:    "/tmp/flowweave-asr",
+		ASRMaxAudioMB: 50,
 	}
 }
 
@@ -120,7 +124,10 @@ func (s *Server) buildRouter() (http.Handler, error) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	workflowHandler := NewWorkflowHandler(s.repo, s.runner, s.config.RunTimeout)
+	workflowHandler := NewWorkflowHandler(s.repo, s.runner, s.config.RunTimeout, RunInputConfig{
+		ASRTempDir:    s.config.ASRTempDir,
+		ASRMaxAudioMB: s.config.ASRMaxAudioMB,
+	})
 	orgHandler := NewOrganizationHandler(s.repo)
 	tenantHandler := NewTenantHandler(s.repo)
 	ragEnabled := s.retriever != nil || s.indexer != nil
