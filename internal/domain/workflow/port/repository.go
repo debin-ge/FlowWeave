@@ -44,6 +44,7 @@ type Repository interface {
 	GetRun(ctx context.Context, id string) (*WorkflowRun, error)
 	UpdateRun(ctx context.Context, run *WorkflowRun) error
 	ListRuns(ctx context.Context, workflowID string, page, pageSize int) ([]*WorkflowRun, error)
+	ClaimNextQueuedRun(ctx context.Context, workerID string) (*WorkflowRun, error)
 
 	// NodeExecution 独立表
 	BatchCreateNodeExecs(ctx context.Context, records []*NodeExecutionRecord) error

@@ -38,6 +38,7 @@ type LLMTraceResponse = port.LLMTraceResponse
 
 const (
 	WorkflowStatusActive = port.WorkflowStatusActive
+	RunStatusQueued      = port.RunStatusQueued
 	RunStatusRunning     = port.RunStatusRunning
 )
 
@@ -137,6 +138,11 @@ func (r *Repository) EnsureTracesTable(ctx context.Context) error {
 func (r *Repository) EnsureRunColumns(ctx context.Context) error {
 	queries := []string{
 		`ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS conversation_id VARCHAR(255) DEFAULT ''`,
+		`ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS queued_at TIMESTAMP WITH TIME ZONE`,
+		`ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS picked_at TIMESTAMP WITH TIME ZONE`,
+		`ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS worker_id VARCHAR(128) DEFAULT ''`,
+		`ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0`,
+		`CREATE INDEX IF NOT EXISTS idx_workflow_runs_queued_pick ON workflow_runs(status, queued_at ASC, started_at ASC)`,
 	}
 	for _, q := range queries {
 		if _, err := r.db.ExecContext(ctx, q); err != nil {
@@ -405,12 +411,26 @@ func (r *Repository) CreateRun(ctx context.Context, run *WorkflowRun) error {
 	if run.Status == "" {
 		run.Status = RunStatusRunning
 	}
+	queuedAt := interface{}(nil)
+	pickedAt := interface{}(nil)
+	workerID := ""
+	if run.Status == RunStatusQueued {
+		queuedAt = run.StartedAt
+		t := run.StartedAt
+		run.QueuedAt = &t
+		run.PickedAt = nil
+	} else {
+		pickedAt = run.StartedAt
+		t := run.StartedAt
+		run.PickedAt = &t
+		run.QueuedAt = nil
+	}
 
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO workflow_runs (id, workflow_id, org_id, tenant_id, conversation_id, status, inputs, outputs, error, total_tokens, total_steps, elapsed_ms, started_at, finished_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+		`INSERT INTO workflow_runs (id, workflow_id, org_id, tenant_id, conversation_id, status, inputs, outputs, error, total_tokens, total_steps, elapsed_ms, started_at, finished_at, queued_at, picked_at, worker_id, retry_count)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
 		run.ID, run.WorkflowID, nullIfEmpty(run.OrgID), nullIfEmpty(run.TenantID), run.ConversationID, run.Status, run.Inputs, run.Outputs, run.Error,
-		run.TotalTokens, run.TotalSteps, run.ElapsedMs, run.StartedAt, run.FinishedAt,
+		run.TotalTokens, run.TotalSteps, run.ElapsedMs, run.StartedAt, run.FinishedAt, queuedAt, pickedAt, workerID, run.RetryCount,
 	)
 	return err
 }
@@ -418,7 +438,7 @@ func (r *Repository) CreateRun(ctx context.Context, run *WorkflowRun) error {
 func (r *Repository) GetRun(ctx context.Context, id string) (*WorkflowRun, error) {
 	run := &WorkflowRun{}
 	var orgID, tenantID sql.NullString
-	query := `SELECT id, workflow_id, COALESCE(org_id::text,''), COALESCE(tenant_id::text,''), conversation_id, status, inputs, outputs, error, total_tokens, total_steps, elapsed_ms, started_at, finished_at
+	query := `SELECT id, workflow_id, COALESCE(org_id::text,''), COALESCE(tenant_id::text,''), conversation_id, status, COALESCE(worker_id,''), retry_count, inputs, outputs, error, total_tokens, total_steps, elapsed_ms, queued_at, picked_at, started_at, finished_at
 		 FROM workflow_runs WHERE id = $1`
 	args := []interface{}{id}
 	if scope := scopeFromContext(ctx); scope != nil {
@@ -426,8 +446,8 @@ func (r *Repository) GetRun(ctx context.Context, id string) (*WorkflowRun, error
 		args = append(args, scope.OrgID, scope.TenantID)
 	}
 	err := r.db.QueryRowContext(ctx, query, args...).Scan(
-		&run.ID, &run.WorkflowID, &orgID, &tenantID, &run.ConversationID, &run.Status, &run.Inputs, &run.Outputs, &run.Error,
-		&run.TotalTokens, &run.TotalSteps, &run.ElapsedMs, &run.StartedAt, &run.FinishedAt,
+		&run.ID, &run.WorkflowID, &orgID, &tenantID, &run.ConversationID, &run.Status, &run.WorkerID, &run.RetryCount, &run.Inputs, &run.Outputs, &run.Error,
+		&run.TotalTokens, &run.TotalSteps, &run.ElapsedMs, &run.QueuedAt, &run.PickedAt, &run.StartedAt, &run.FinishedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -447,6 +467,53 @@ func (r *Repository) UpdateRun(ctx context.Context, run *WorkflowRun) error {
 	}
 	_, err := r.db.ExecContext(ctx, query, args...)
 	return err
+}
+
+func (r *Repository) ClaimNextQueuedRun(ctx context.Context, workerID string) (*WorkflowRun, error) {
+	run := &WorkflowRun{}
+	var orgID, tenantID sql.NullString
+	var inputsJSON, outputsJSON []byte
+	query := `
+	WITH picked AS (
+		SELECT id
+		FROM workflow_runs
+		WHERE status = $1
+		ORDER BY queued_at ASC NULLS LAST, started_at ASC, id ASC
+		FOR UPDATE SKIP LOCKED
+		LIMIT 1
+	)
+	UPDATE workflow_runs wr
+	SET status = $2,
+		picked_at = NOW(),
+		started_at = NOW(),
+		worker_id = $3
+	FROM picked
+	WHERE wr.id = picked.id
+	RETURNING wr.id, wr.workflow_id, COALESCE(wr.org_id::text,''), COALESCE(wr.tenant_id::text,''),
+	          wr.conversation_id, wr.status, COALESCE(wr.worker_id,''), wr.retry_count,
+	          wr.inputs, wr.outputs, wr.error, wr.total_tokens, wr.total_steps, wr.elapsed_ms,
+	          wr.queued_at, wr.picked_at, wr.started_at, wr.finished_at`
+
+	err := r.db.QueryRowContext(ctx, query, RunStatusQueued, RunStatusRunning, workerID).Scan(
+		&run.ID, &run.WorkflowID, &orgID, &tenantID, &run.ConversationID, &run.Status, &run.WorkerID, &run.RetryCount,
+		&inputsJSON, &outputsJSON, &run.Error, &run.TotalTokens, &run.TotalSteps, &run.ElapsedMs,
+		&run.QueuedAt, &run.PickedAt, &run.StartedAt, &run.FinishedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	run.OrgID = orgID.String
+	run.TenantID = tenantID.String
+	if len(inputsJSON) > 0 {
+		run.Inputs = append(run.Inputs[:0], inputsJSON...)
+	}
+	if len(outputsJSON) > 0 {
+		run.Outputs = append(run.Outputs[:0], outputsJSON...)
+	}
+	return run, nil
 }
 
 func (r *Repository) ListRuns(ctx context.Context, workflowID string, page, pageSize int) ([]*WorkflowRun, error) {
@@ -479,7 +546,7 @@ func (r *Repository) ListRuns(ctx context.Context, workflowID string, page, page
 	whereClause := "WHERE " + strings.Join(where, " AND ")
 
 	query := fmt.Sprintf(
-		`SELECT id, workflow_id, COALESCE(org_id::text,''), COALESCE(tenant_id::text,''), conversation_id, status, inputs, outputs, error, total_tokens, total_steps, elapsed_ms, started_at, finished_at
+		`SELECT id, workflow_id, COALESCE(org_id::text,''), COALESCE(tenant_id::text,''), conversation_id, status, COALESCE(worker_id,''), retry_count, inputs, outputs, error, total_tokens, total_steps, elapsed_ms, queued_at, picked_at, started_at, finished_at
 		 FROM workflow_runs %s ORDER BY started_at DESC LIMIT $%d OFFSET $%d`,
 		whereClause, argIdx, argIdx+1,
 	)
@@ -495,8 +562,8 @@ func (r *Repository) ListRuns(ctx context.Context, workflowID string, page, page
 	for rows.Next() {
 		run := &WorkflowRun{}
 		var orgID, tenantID sql.NullString
-		if err := rows.Scan(&run.ID, &run.WorkflowID, &orgID, &tenantID, &run.ConversationID, &run.Status, &run.Inputs, &run.Outputs, &run.Error,
-			&run.TotalTokens, &run.TotalSteps, &run.ElapsedMs, &run.StartedAt, &run.FinishedAt); err != nil {
+		if err := rows.Scan(&run.ID, &run.WorkflowID, &orgID, &tenantID, &run.ConversationID, &run.Status, &run.WorkerID, &run.RetryCount, &run.Inputs, &run.Outputs, &run.Error,
+			&run.TotalTokens, &run.TotalSteps, &run.ElapsedMs, &run.QueuedAt, &run.PickedAt, &run.StartedAt, &run.FinishedAt); err != nil {
 			return nil, err
 		}
 		run.OrgID = orgID.String

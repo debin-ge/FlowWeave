@@ -1,0 +1,6 @@
+ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS queued_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS picked_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS worker_id VARCHAR(128) NOT NULL DEFAULT '';
+ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_queued_pick ON workflow_runs(status, queued_at ASC, started_at ASC);

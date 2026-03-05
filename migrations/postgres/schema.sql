@@ -65,18 +65,23 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
     tenant_id       UUID,
     conversation_id VARCHAR(255),
     status          VARCHAR(32) NOT NULL DEFAULT 'running',
+    worker_id       VARCHAR(128) NOT NULL DEFAULT '',
+    retry_count     INTEGER NOT NULL DEFAULT 0,
     inputs          JSONB,
     outputs         JSONB,
     error           TEXT DEFAULT '',
     total_tokens    INTEGER DEFAULT 0,
     total_steps     INTEGER DEFAULT 0,
     elapsed_ms      BIGINT DEFAULT 0,
+    queued_at       TIMESTAMP WITH TIME ZONE,
+    picked_at       TIMESTAMP WITH TIME ZONE,
     started_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     finished_at     TIMESTAMP WITH TIME ZONE
 );
 
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow_id ON workflow_runs(workflow_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_queued_pick ON workflow_runs(status, queued_at ASC, started_at ASC);
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_started_at ON workflow_runs(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_conversation_id ON workflow_runs(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_runs_scope_started ON workflow_runs(org_id, tenant_id, started_at DESC);

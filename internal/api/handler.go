@@ -45,6 +45,7 @@ func (h *WorkflowHandler) RegisterRoutes(r chi.Router) {
 		r.Put("/{id}", h.UpdateWorkflow)
 		r.Delete("/{id}", h.DeleteWorkflow)
 		r.Post("/{id}/run", h.RunWorkflow)
+		r.Post("/{id}/run/async", h.RunWorkflowAsync)
 		r.Post("/{id}/run/stream", h.RunWorkflowStream)
 	})
 	r.Get("/api/v1/runs/{id}", h.GetRun)
@@ -228,6 +229,60 @@ func (h *WorkflowHandler) DeleteWorkflow(w http.ResponseWriter, r *http.Request)
 type runWorkflowRequest struct {
 	Inputs         map[string]interface{} `json:"inputs"`
 	ConversationID string                 `json:"conversation_id,omitempty"`
+}
+
+func (h *WorkflowHandler) RunWorkflowAsync(w http.ResponseWriter, r *http.Request) {
+	ctx, scope := h.injectScope(r.Context())
+	id := chi.URLParam(r, "id")
+
+	wf, err := h.repo.GetWorkflow(ctx, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get workflow")
+		return
+	}
+	if wf == nil {
+		writeError(w, http.StatusNotFound, "workflow not found")
+		return
+	}
+
+	var req runWorkflowRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		req.Inputs = make(map[string]interface{})
+	}
+
+	if req.ConversationID != "" {
+		if err := h.ensureConversationOwnership(ctx, req.ConversationID, scope); err != nil {
+			if strings.Contains(err.Error(), "conversation_id_conflict") {
+				writeErrorCode(w, http.StatusConflict, "conversation_id_conflict", "Conversation ID is owned by another tenant")
+			} else {
+				writeError(w, http.StatusInternalServerError, "failed to verify conversation ownership")
+			}
+			return
+		}
+	}
+
+	inputsJSON, _ := json.Marshal(req.Inputs)
+	run := &port.WorkflowRun{
+		WorkflowID:     wf.ID,
+		ConversationID: req.ConversationID,
+		Status:         port.RunStatusQueued,
+		Inputs:         inputsJSON,
+	}
+	if scope != nil {
+		run.OrgID = scope.OrgID
+		run.TenantID = scope.TenantID
+	}
+	if err := h.repo.CreateRun(ctx, run); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create run")
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{
+		"run_id":      run.ID,
+		"workflow_id": run.WorkflowID,
+		"status":      run.Status,
+		"queued_at":   run.QueuedAt,
+	})
 }
 
 func (h *WorkflowHandler) RunWorkflow(w http.ResponseWriter, r *http.Request) {

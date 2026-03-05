@@ -17,6 +17,7 @@ const (
 type RunStatus string
 
 const (
+	RunStatusQueued    RunStatus = "queued"
 	RunStatusRunning   RunStatus = "running"
 	RunStatusSucceeded RunStatus = "succeeded"
 	RunStatusFailed    RunStatus = "failed"
@@ -45,12 +46,16 @@ type WorkflowRun struct {
 	TenantID       string          `json:"tenant_id,omitempty"`
 	ConversationID string          `json:"conversation_id,omitempty"`
 	Status         RunStatus       `json:"status"`
+	WorkerID       string          `json:"worker_id,omitempty"`
+	RetryCount     int             `json:"retry_count,omitempty"`
 	Inputs         json.RawMessage `json:"inputs,omitempty"`
 	Outputs        json.RawMessage `json:"outputs,omitempty"`
 	Error          string          `json:"error,omitempty"`
 	TotalTokens    int             `json:"total_tokens"`
 	TotalSteps     int             `json:"total_steps"`
 	ElapsedMs      int64           `json:"elapsed_ms"`
+	QueuedAt       *time.Time      `json:"queued_at,omitempty"`
+	PickedAt       *time.Time      `json:"picked_at,omitempty"`
 	StartedAt      time.Time       `json:"started_at"`
 	FinishedAt     *time.Time      `json:"finished_at,omitempty"`
 }

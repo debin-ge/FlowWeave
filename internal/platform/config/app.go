@@ -42,6 +42,9 @@ type RuntimeConfig struct {
 	MTMEnsureTimeoutSeconds      int `json:"mtm_ensure_timeout_seconds"`
 	ShutdownTimeoutSeconds       int `json:"shutdown_timeout_seconds"`
 	OpenSearchPingTimeoutSeconds int `json:"opensearch_ping_timeout_seconds"`
+	AsyncRunWorkers              int `json:"async_run_workers"`
+	AsyncRunPollIntervalMs       int `json:"async_run_poll_interval_ms"`
+	AsyncRunTimeoutSeconds       int `json:"async_run_timeout_seconds"`
 }
 
 type DatabaseConfig struct {
@@ -105,6 +108,9 @@ func Default() *AppConfig {
 			MTMEnsureTimeoutSeconds:      5,
 			ShutdownTimeoutSeconds:       10,
 			OpenSearchPingTimeoutSeconds: 5,
+			AsyncRunWorkers:              2,
+			AsyncRunPollIntervalMs:       500,
+			AsyncRunTimeoutSeconds:       300,
 		},
 		Database: DatabaseConfig{
 			MaxOpenConns:           25,
@@ -185,6 +191,9 @@ func (c *AppConfig) applyEnv() {
 	applyInt("RUNTIME_MTM_ENSURE_TIMEOUT", &c.Runtime.MTMEnsureTimeoutSeconds)
 	applyInt("RUNTIME_SHUTDOWN_TIMEOUT", &c.Runtime.ShutdownTimeoutSeconds)
 	applyInt("RUNTIME_OPENSEARCH_PING_TIMEOUT", &c.Runtime.OpenSearchPingTimeoutSeconds)
+	applyInt("RUNTIME_ASYNC_RUN_WORKERS", &c.Runtime.AsyncRunWorkers)
+	applyInt("RUNTIME_ASYNC_RUN_POLL_INTERVAL_MS", &c.Runtime.AsyncRunPollIntervalMs)
+	applyInt("RUNTIME_ASYNC_RUN_TIMEOUT", &c.Runtime.AsyncRunTimeoutSeconds)
 
 	applyString("DATABASE_URL", &c.Database.URL)
 	applyInt("DATABASE_MAX_OPEN_CONNS", &c.Database.MaxOpenConns)

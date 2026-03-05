@@ -27,6 +27,9 @@ import (
 )
 
 func main() {
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Config load failed: %v\n", err)
@@ -103,6 +106,12 @@ func main() {
 
 	memCoord := initMemory(db, cfg)
 	runner := workflow.NewWorkflowRunner(engineConfig, memCoord)
+	asyncManager := workflow.NewAsyncRunManager(repo, runner, workflow.AsyncRunManagerConfig{
+		Workers:      cfg.Runtime.AsyncRunWorkers,
+		PollInterval: time.Duration(cfg.Runtime.AsyncRunPollIntervalMs) * time.Millisecond,
+		RunTimeout:   time.Duration(cfg.Runtime.AsyncRunTimeoutSeconds) * time.Second,
+	})
+	asyncManager.Start(appCtx)
 
 	serverConfig := api.DefaultServerConfig()
 	serverConfig.Host = cfg.Server.Host
@@ -188,6 +197,7 @@ func main() {
 		<-sigCh
 
 		applog.Info("🔄 Shutting down...")
+		appCancel()
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Runtime.ShutdownTimeoutSeconds)*time.Second)
 		defer cancel()
 
@@ -199,6 +209,7 @@ func main() {
 	if err := server.Start(); err != nil && err.Error() != "http: Server closed" {
 		applog.Fatalf("❌ Server error: %v", err)
 	}
+	appCancel()
 
 	applog.Info("👋 Server stopped")
 }

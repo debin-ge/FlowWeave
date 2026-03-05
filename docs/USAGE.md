@@ -111,6 +111,33 @@ SSE 事件类型：
 - `done`：结束事件
 - `error`：执行失败事件
 
+## 5.4 异步运行（提交即返回）
+
+```bash
+curl -sS -X POST http://localhost:8080/api/v1/workflows/{workflow_id}/run/async \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inputs": { "query": "异步执行测试" },
+    "conversation_id": "conv-async-001"
+  }'
+```
+
+典型返回：
+
+```json
+{
+  "run_id": "xxxx-xxxx",
+  "workflow_id": "yyyy-yyyy",
+  "status": "queued",
+  "queued_at": "2026-03-05T10:00:00Z"
+}
+```
+
+随后可轮询：
+
+- `GET /api/v1/runs/{run_id}`
+- `GET /api/v1/runs/{run_id}/nodes`
+
 ## 6. 鉴权使用（JWT）
 
 配置 `JWT_SECRET` 后，业务接口需要：
@@ -183,6 +210,7 @@ curl -sS -X POST http://localhost:8080/rag/search \
 - `PUT /api/v1/workflows/{id}`
 - `DELETE /api/v1/workflows/{id}`
 - `POST /api/v1/workflows/{id}/run`
+- `POST /api/v1/workflows/{id}/run/async`
 - `POST /api/v1/workflows/{id}/run/stream`
 - `GET /api/v1/runs/{id}`
 - `GET /api/v1/runs/{id}/nodes`
