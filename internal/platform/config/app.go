@@ -99,6 +99,7 @@ type ASRConfig struct {
 	Tencent            TencentASRConfig    `json:"tencent"`
 	TencentRec         TencentRecASRConfig `json:"tencent_rec"`
 	AzureBatch         AzureBatchASRConfig `json:"azure_batch"`
+	OpenAI             OpenAIASRConfig     `json:"openai"`
 	Async              ASRAsyncConfig      `json:"async"`
 }
 
@@ -123,6 +124,13 @@ type AzureBatchASRConfig struct {
 	APIVersion      string `json:"api_version"`
 	Locale          string `json:"locale"`
 	HTTPTimeoutMS   int    `json:"http_timeout_ms"`
+}
+
+type OpenAIASRConfig struct {
+	BaseURL       string `json:"base_url"`
+	APIKey        string `json:"api_key"`
+	Model         string `json:"model"`
+	HTTPTimeoutMS int    `json:"http_timeout_ms"`
 }
 
 type ASRAsyncConfig struct {
@@ -195,6 +203,11 @@ func Default() *AppConfig {
 			AzureBatch: AzureBatchASRConfig{
 				APIVersion:    "2024-11-15",
 				Locale:        "zh-CN",
+				HTTPTimeoutMS: 30000,
+			},
+			OpenAI: OpenAIASRConfig{
+				BaseURL:       "https://api.openai.com/v1",
+				Model:         "gpt-4o-transcribe",
 				HTTPTimeoutMS: 30000,
 			},
 			Async: ASRAsyncConfig{
@@ -307,6 +320,10 @@ func (c *AppConfig) applyEnv() {
 	applyString("AZURE_ASR_API_VERSION", &c.ASR.AzureBatch.APIVersion)
 	applyString("AZURE_ASR_LOCALE", &c.ASR.AzureBatch.Locale)
 	applyInt("AZURE_ASR_HTTP_TIMEOUT_MS", &c.ASR.AzureBatch.HTTPTimeoutMS)
+	applyString("OPENAI_ASR_BASE_URL", &c.ASR.OpenAI.BaseURL)
+	applyString("OPENAI_ASR_API_KEY", &c.ASR.OpenAI.APIKey)
+	applyString("OPENAI_ASR_MODEL", &c.ASR.OpenAI.Model)
+	applyInt("OPENAI_ASR_HTTP_TIMEOUT_MS", &c.ASR.OpenAI.HTTPTimeoutMS)
 	applyString("ASR_CALLBACK_BASE_URL", &c.ASR.Async.CallbackBaseURL)
 	applyInt("ASR_REC_POLL_INTERVAL_MS", &c.ASR.Async.PollIntervalMS)
 	applyInt("ASR_REC_MAX_WAIT_MS", &c.ASR.Async.WaitTimeoutMS)
@@ -389,6 +406,15 @@ func (c *AppConfig) normalize() {
 	}
 	if c.ASR.AzureBatch.HTTPTimeoutMS <= 0 {
 		c.ASR.AzureBatch.HTTPTimeoutMS = 30000
+	}
+	if c.ASR.OpenAI.BaseURL == "" {
+		c.ASR.OpenAI.BaseURL = "https://api.openai.com/v1"
+	}
+	if c.ASR.OpenAI.Model == "" {
+		c.ASR.OpenAI.Model = "gpt-4o-transcribe"
+	}
+	if c.ASR.OpenAI.HTTPTimeoutMS <= 0 {
+		c.ASR.OpenAI.HTTPTimeoutMS = 30000
 	}
 	if c.ASR.Async.PollIntervalMS <= 0 {
 		c.ASR.Async.PollIntervalMS = 1500

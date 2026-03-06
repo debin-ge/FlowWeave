@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -230,6 +231,16 @@ func initASRProviders(cfg *config.AppConfig) {
 	if cfg == nil {
 		return
 	}
+
+	openaiASRKey := strings.TrimSpace(cfg.ASR.OpenAI.APIKey)
+	if openaiASRKey == "" {
+		openaiASRKey = strings.TrimSpace(cfg.OpenAI.APIKey)
+	}
+	openaiASRBaseURL := strings.TrimSpace(cfg.ASR.OpenAI.BaseURL)
+	if openaiASRBaseURL == "" {
+		openaiASRBaseURL = strings.TrimSpace(cfg.OpenAI.BaseURL)
+	}
+
 	bootstrap.RegisterASRProviders(
 		cfg.ASR.TempDir,
 		cfg.ASR.MaxAudioMB,
@@ -252,6 +263,10 @@ func initASRProviders(cfg *config.AppConfig) {
 		cfg.ASR.AzureBatch.APIVersion,
 		cfg.ASR.AzureBatch.Locale,
 		cfg.ASR.AzureBatch.HTTPTimeoutMS,
+		openaiASRKey,
+		openaiASRBaseURL,
+		cfg.ASR.OpenAI.Model,
+		cfg.ASR.OpenAI.HTTPTimeoutMS,
 	)
 }
 

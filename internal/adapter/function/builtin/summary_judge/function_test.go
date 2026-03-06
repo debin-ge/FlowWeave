@@ -50,6 +50,29 @@ func TestSummaryJudgeUnderLimit(t *testing.T) {
 	}
 }
 
+func TestSummaryJudgeOverLimitWithTinyBudget(t *testing.T) {
+	f := &function{}
+	out, err := f.Execute(context.Background(), map[string]interface{}{
+		"args": map[string]interface{}{
+			"text":            "short text",
+			"context_window":  10,
+			"reserve_tokens":  9,
+			"threshold_ratio": 0.8,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	over, ok := out["over_limit"].(bool)
+	if !ok {
+		t.Fatalf("expected over_limit bool, got %T", out["over_limit"])
+	}
+	if !over {
+		t.Fatalf("expected over_limit=true, output=%v", out)
+	}
+}
+
 func TestSummaryJudgeMissingArgs(t *testing.T) {
 	f := &function{}
 	_, err := f.Execute(context.Background(), map[string]interface{}{})

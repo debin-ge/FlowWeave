@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	_ "flowweave/internal/adapter/function/builtin/azure_translate"
 	// Built-in local functions registration
 	_ "flowweave/internal/adapter/function/builtin/echo"
 	_ "flowweave/internal/adapter/function/builtin/prime_judge"

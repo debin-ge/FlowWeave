@@ -11,7 +11,7 @@ import (
 
 const (
 	defaultContextWindow = 1000
-	defaultReserveTokens = 1000
+	defaultReserveTokens = 100
 	defaultThresholdRate = 0.80
 )
 

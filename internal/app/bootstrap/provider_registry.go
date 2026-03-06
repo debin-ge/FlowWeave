@@ -3,6 +3,7 @@ package bootstrap
 import (
 	asrprovider "flowweave/internal/adapter/provider/asr"
 	azureasr "flowweave/internal/adapter/provider/asr/azure"
+	openaiasr "flowweave/internal/adapter/provider/asr/openai"
 	tencentasr "flowweave/internal/adapter/provider/asr/tencent"
 	"flowweave/internal/adapter/provider/llm"
 	"flowweave/internal/adapter/provider/llm/openai"
@@ -49,6 +50,10 @@ func RegisterASRProviders(
 	azureAPIVersion string,
 	azureLocale string,
 	azureHTTPTimeoutMS int,
+	openaiASRAPIKey string,
+	openaiASRBaseURL string,
+	openaiASRModel string,
+	openaiASRHTTPTimeoutMS int,
 ) {
 	asrprovider.SetASRRuntimeConfig(asrprovider.ASRRuntimeConfig{
 		TempDir:           tempDir,
@@ -112,6 +117,23 @@ func RegisterASRProviders(
 		} else {
 			asrprovider.RegisterASRAsyncProvider(azProvider)
 			applog.Infof("✅ Registered ASR async provider: %s", azProvider.Name())
+		}
+	}
+
+	if openaiASRAPIKey == "" {
+		applog.Warn("⚠️  OpenAI ASR API key missing, openai_asr provider not registered")
+	} else {
+		openaiProvider, err := openaiasr.NewProvider(openaiasr.Config{
+			APIKey:       openaiASRAPIKey,
+			BaseURL:      openaiASRBaseURL,
+			DefaultModel: openaiASRModel,
+			HTTPTimeout:  openaiASRHTTPTimeoutMS,
+		})
+		if err != nil {
+			applog.Warnf("⚠️  Failed to init OpenAI ASR provider: %v", err)
+		} else {
+			asrprovider.RegisterASRProvider(openaiProvider)
+			applog.Infof("✅ Registered ASR provider: %s", openaiProvider.Name())
 		}
 	}
 }
