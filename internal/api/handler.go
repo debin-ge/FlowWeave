@@ -13,9 +13,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	asrprovider "flowweave/internal/adapter/provider/asr"
 	"flowweave/internal/app/workflow"
 	"flowweave/internal/domain/workflow/engine"
 	"flowweave/internal/domain/workflow/event"
+	types "flowweave/internal/domain/workflow/model"
+	asrnode "flowweave/internal/domain/workflow/node/asr"
 	"flowweave/internal/domain/workflow/port"
 )
 
@@ -308,6 +311,10 @@ func (h *WorkflowHandler) RunWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "workflow not found")
 		return
 	}
+	if err := validateWorkflowSyncCompatible(wf.DSL); err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "workflow_sync_unsupported", err.Error())
+		return
+	}
 
 	// 2. 解析输入
 	req, err := parseRunWorkflowRequest(r, h.runInput)
@@ -437,6 +444,10 @@ func (h *WorkflowHandler) RunWorkflowStream(w http.ResponseWriter, r *http.Reque
 	}
 	if wf == nil {
 		writeError(w, http.StatusNotFound, "workflow not found")
+		return
+	}
+	if err := validateWorkflowSyncCompatible(wf.DSL); err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "workflow_sync_unsupported", err.Error())
 		return
 	}
 
@@ -937,6 +948,46 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+func validateWorkflowSyncCompatible(dsl json.RawMessage) error {
+	var cfg types.GraphConfig
+	if err := json.Unmarshal(dsl, &cfg); err != nil {
+		return fmt.Errorf("invalid workflow dsl: %w", err)
+	}
+	for _, nodeCfg := range cfg.Nodes {
+		nodeType := strings.TrimSpace(nodeCfg.Type)
+		if nodeType == "" {
+			var raw map[string]interface{}
+			if err := json.Unmarshal(nodeCfg.Data, &raw); err == nil {
+				nodeType = strings.TrimSpace(extractString(raw, "type"))
+			}
+		}
+		if nodeType != string(types.NodeTypeASR) {
+			continue
+		}
+
+		var data asrnode.ASRNodeData
+		if err := json.Unmarshal(nodeCfg.Data, &data); err != nil {
+			continue
+		}
+
+		providerName := strings.TrimSpace(data.Provider)
+		asyncMode := strings.TrimSpace(data.AsyncMode)
+		if asyncMode != "" {
+			return fmt.Errorf("asr node %s uses async_mode=%s, sync run is unsupported; use /api/v1/workflows/{id}/run/async", nodeCfg.ID, asyncMode)
+		}
+
+		if providerName == "" {
+			continue
+		}
+		hasSync := asrprovider.HasASRProvider(providerName)
+		hasAsync := asrprovider.HasASRAsyncProvider(providerName)
+		if !hasSync && hasAsync {
+			return fmt.Errorf("asr node %s uses async-only provider=%s, sync run is unsupported; use /api/v1/workflows/{id}/run/async", nodeCfg.ID, providerName)
+		}
+	}
+	return nil
 }
 
 // ListNodeExecutions 查询某次执行的节点执行记录

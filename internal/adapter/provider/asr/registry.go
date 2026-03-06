@@ -32,3 +32,11 @@ func GetASRProvider(name string) (ASRProvider, error) {
 	}
 	return p, nil
 }
+
+// HasASRProvider checks whether a sync ASR provider is registered.
+func HasASRProvider(name string) bool {
+	globalASRRegistry.mu.RLock()
+	defer globalASRRegistry.mu.RUnlock()
+	_, ok := globalASRRegistry.providers[name]
+	return ok
+}

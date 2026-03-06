@@ -246,6 +246,12 @@ func initASRProviders(cfg *config.AppConfig) {
 		cfg.ASR.TencentRec.SecretKey,
 		cfg.ASR.TencentRec.Region,
 		cfg.ASR.TencentRec.EngineModelType,
+		cfg.ASR.AzureBatch.Endpoint,
+		cfg.ASR.AzureBatch.Region,
+		cfg.ASR.AzureBatch.SubscriptionKey,
+		cfg.ASR.AzureBatch.APIVersion,
+		cfg.ASR.AzureBatch.Locale,
+		cfg.ASR.AzureBatch.HTTPTimeoutMS,
 	)
 }
 

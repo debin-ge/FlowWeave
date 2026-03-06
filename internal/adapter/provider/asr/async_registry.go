@@ -30,3 +30,11 @@ func GetASRAsyncProvider(name string) (ASRAsyncProvider, error) {
 	}
 	return p, nil
 }
+
+// HasASRAsyncProvider checks whether an async ASR provider is registered.
+func HasASRAsyncProvider(name string) bool {
+	globalASRAsyncRegistry.mu.RLock()
+	defer globalASRAsyncRegistry.mu.RUnlock()
+	_, ok := globalASRAsyncRegistry.providers[name]
+	return ok
+}

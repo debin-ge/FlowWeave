@@ -98,6 +98,7 @@ type ASRConfig struct {
 	TempFileTTLMinutes int                 `json:"temp_file_ttl_minutes"`
 	Tencent            TencentASRConfig    `json:"tencent"`
 	TencentRec         TencentRecASRConfig `json:"tencent_rec"`
+	AzureBatch         AzureBatchASRConfig `json:"azure_batch"`
 	Async              ASRAsyncConfig      `json:"async"`
 }
 
@@ -113,6 +114,15 @@ type TencentRecASRConfig struct {
 	SecretKey       string `json:"secret_key"`
 	Region          string `json:"region"`
 	EngineModelType string `json:"engine_model_type"`
+}
+
+type AzureBatchASRConfig struct {
+	Endpoint        string `json:"endpoint"`
+	Region          string `json:"region"`
+	SubscriptionKey string `json:"subscription_key"`
+	APIVersion      string `json:"api_version"`
+	Locale          string `json:"locale"`
+	HTTPTimeoutMS   int    `json:"http_timeout_ms"`
 }
 
 type ASRAsyncConfig struct {
@@ -181,6 +191,11 @@ func Default() *AppConfig {
 			TencentRec: TencentRecASRConfig{
 				Region:          "ap-shanghai",
 				EngineModelType: "16k_zh",
+			},
+			AzureBatch: AzureBatchASRConfig{
+				APIVersion:    "2024-11-15",
+				Locale:        "zh-CN",
+				HTTPTimeoutMS: 30000,
 			},
 			Async: ASRAsyncConfig{
 				PollIntervalMS: 1500,
@@ -286,6 +301,12 @@ func (c *AppConfig) applyEnv() {
 	applyString("TENCENT_REC_SECRET_KEY", &c.ASR.TencentRec.SecretKey)
 	applyString("TENCENT_REC_REGION", &c.ASR.TencentRec.Region)
 	applyString("TENCENT_REC_ENGINE_MODEL_TYPE", &c.ASR.TencentRec.EngineModelType)
+	applyString("AZURE_ASR_ENDPOINT", &c.ASR.AzureBatch.Endpoint)
+	applyString("AZURE_ASR_REGION", &c.ASR.AzureBatch.Region)
+	applyString("AZURE_ASR_SUBSCRIPTION_KEY", &c.ASR.AzureBatch.SubscriptionKey)
+	applyString("AZURE_ASR_API_VERSION", &c.ASR.AzureBatch.APIVersion)
+	applyString("AZURE_ASR_LOCALE", &c.ASR.AzureBatch.Locale)
+	applyInt("AZURE_ASR_HTTP_TIMEOUT_MS", &c.ASR.AzureBatch.HTTPTimeoutMS)
 	applyString("ASR_CALLBACK_BASE_URL", &c.ASR.Async.CallbackBaseURL)
 	applyInt("ASR_REC_POLL_INTERVAL_MS", &c.ASR.Async.PollIntervalMS)
 	applyInt("ASR_REC_MAX_WAIT_MS", &c.ASR.Async.WaitTimeoutMS)
@@ -359,6 +380,15 @@ func (c *AppConfig) normalize() {
 	}
 	if c.ASR.TencentRec.EngineModelType == "" {
 		c.ASR.TencentRec.EngineModelType = "16k_zh"
+	}
+	if c.ASR.AzureBatch.APIVersion == "" {
+		c.ASR.AzureBatch.APIVersion = "2024-11-15"
+	}
+	if c.ASR.AzureBatch.Locale == "" {
+		c.ASR.AzureBatch.Locale = "zh-CN"
+	}
+	if c.ASR.AzureBatch.HTTPTimeoutMS <= 0 {
+		c.ASR.AzureBatch.HTTPTimeoutMS = 30000
 	}
 	if c.ASR.Async.PollIntervalMS <= 0 {
 		c.ASR.Async.PollIntervalMS = 1500
