@@ -3,7 +3,7 @@ package memory
 import (
 	applog "flowweave/internal/platform/log"
 
-	"flowweave/internal/provider"
+	"flowweave/internal/adapter/provider/llm"
 )
 
 // --- Gateway 全局默认值（从环境变量设置，可被 DSL 覆盖）---

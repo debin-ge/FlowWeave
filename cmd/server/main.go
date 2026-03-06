@@ -80,6 +80,11 @@ func main() {
 	} else {
 		applog.Info("✅ LLM call traces table ready")
 	}
+	if err := pgRepo.EnsureExternalAsyncTaskTable(migrateCtx); err != nil {
+		applog.Warnf("⚠️  Failed to ensure external_async_tasks table: %v", err)
+	} else {
+		applog.Info("✅ External async tasks table ready")
+	}
 	if err := pgRepo.EnsureTenantTables(migrateCtx); err != nil {
 		applog.Warnf("⚠️  Failed to ensure tenant tables: %v", err)
 	} else {
@@ -230,10 +235,17 @@ func initASRProviders(cfg *config.AppConfig) {
 		cfg.ASR.MaxAudioMB,
 		cfg.ASR.MaxBase64Chars,
 		cfg.ASR.URLFetchTimeoutMS,
+		cfg.ASR.Async.CallbackBaseURL,
+		cfg.ASR.Async.PollIntervalMS,
+		cfg.ASR.Async.WaitTimeoutMS,
 		cfg.ASR.Tencent.AppID,
 		cfg.ASR.Tencent.SecretID,
 		cfg.ASR.Tencent.SecretKey,
 		cfg.ASR.Tencent.EngineType,
+		cfg.ASR.TencentRec.SecretID,
+		cfg.ASR.TencentRec.SecretKey,
+		cfg.ASR.TencentRec.Region,
+		cfg.ASR.TencentRec.EngineModelType,
 	)
 }
 

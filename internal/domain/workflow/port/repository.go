@@ -58,6 +58,12 @@ type Repository interface {
 	CreateLLMTrace(ctx context.Context, record *LLMCallTraceRecord) error
 	ListLLMTraces(ctx context.Context, conversationID string) ([]*LLMCallTraceRecord, error)
 
+	// ExternalAsyncTask 统一外部异步任务表
+	CreateExternalAsyncTask(ctx context.Context, task *ExternalAsyncTask) error
+	GetExternalAsyncTask(ctx context.Context, id string) (*ExternalAsyncTask, error)
+	GetExternalAsyncTaskByProviderRef(ctx context.Context, provider, providerTaskRef string) (*ExternalAsyncTask, error)
+	UpdateExternalAsyncTask(ctx context.Context, task *ExternalAsyncTask) error
+
 	// 会话归属校验
 	EnsureConversationOwnership(ctx context.Context, conversationID, orgID, tenantID string) error
 	ValidateConversationOwnership(ctx context.Context, conversationID, orgID, tenantID string) error
@@ -66,6 +72,7 @@ type Repository interface {
 	EnsureTenantTables(ctx context.Context) error
 	EnsureTenantColumns(ctx context.Context) error
 	EnsureRAGTables(ctx context.Context) error
+	EnsureExternalAsyncTaskTable(ctx context.Context) error
 }
 
 // scopeInfo 用于从 context 中读取 scope（repository 层的轻量读取）

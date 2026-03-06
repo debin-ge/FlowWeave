@@ -221,3 +221,50 @@ type Document struct {
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
+
+// AsyncTaskStatus 外部异步任务状态
+type AsyncTaskStatus string
+
+const (
+	AsyncTaskStatusSubmitted AsyncTaskStatus = "submitted"
+	AsyncTaskStatusRunning   AsyncTaskStatus = "running"
+	AsyncTaskStatusSucceeded AsyncTaskStatus = "succeeded"
+	AsyncTaskStatusFailed    AsyncTaskStatus = "failed"
+	AsyncTaskStatusTimeout   AsyncTaskStatus = "timeout"
+	AsyncTaskStatusCanceled  AsyncTaskStatus = "canceled"
+	AsyncTaskStatusExpired   AsyncTaskStatus = "expired"
+)
+
+// ExternalAsyncTask 统一外部异步任务记录
+type ExternalAsyncTask struct {
+	ID                 string                 `json:"id"`
+	TaskType           string                 `json:"task_type"`
+	Provider           string                 `json:"provider"`
+	ProviderTaskRef    string                 `json:"provider_task_ref"`
+	RunID              string                 `json:"run_id,omitempty"`
+	WorkflowID         string                 `json:"workflow_id,omitempty"`
+	NodeID             string                 `json:"node_id,omitempty"`
+	OrgID              string                 `json:"org_id,omitempty"`
+	TenantID           string                 `json:"tenant_id,omitempty"`
+	ConversationID     string                 `json:"conversation_id,omitempty"`
+	Status             AsyncTaskStatus        `json:"status"`
+	SubmittedAt        time.Time              `json:"submitted_at"`
+	StartedAt          *time.Time             `json:"started_at,omitempty"`
+	CompletedAt        *time.Time             `json:"completed_at,omitempty"`
+	CallbackReceivedAt *time.Time             `json:"callback_received_at,omitempty"`
+	NextPollAt         *time.Time             `json:"next_poll_at,omitempty"`
+	PollCount          int                    `json:"poll_count"`
+	CallbackMode       string                 `json:"callback_mode,omitempty"`
+	CallbackToken      string                 `json:"callback_token,omitempty"`
+	CallbackURL        string                 `json:"callback_url,omitempty"`
+	SubmitPayload      map[string]interface{} `json:"submit_payload,omitempty"`
+	QueryPayload       map[string]interface{} `json:"query_payload,omitempty"`
+	ResultPayload      map[string]interface{} `json:"result_payload,omitempty"`
+	NormalizedResult   map[string]interface{} `json:"normalized_result,omitempty"`
+	ResultURL          string                 `json:"result_url,omitempty"`
+	ErrorCode          string                 `json:"error_code,omitempty"`
+	ErrorMessage       string                 `json:"error_message,omitempty"`
+	Version            int64                  `json:"version"`
+	CreatedAt          time.Time              `json:"created_at"`
+	UpdatedAt          time.Time              `json:"updated_at"`
+}

@@ -1,7 +1,7 @@
 package memory
 
 import (
-	"flowweave/internal/provider"
+	"flowweave/internal/adapter/provider/llm"
 )
 
 // TokenEstimator Token 估算器接口

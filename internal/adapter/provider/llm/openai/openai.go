@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"flowweave/internal/provider"
+	"flowweave/internal/adapter/provider/llm"
 )
 
 // Config OpenAI 兼容 API 配置

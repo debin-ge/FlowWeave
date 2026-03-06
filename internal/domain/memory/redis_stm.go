@@ -1,17 +1,17 @@
 package memory
 
 import (
-	applog "flowweave/internal/platform/log"
 	"context"
 	"encoding/json"
 	"errors"
+	applog "flowweave/internal/platform/log"
 	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 
-	"flowweave/internal/provider"
+	"flowweave/internal/adapter/provider/llm"
 )
 
 // RedisSTM Redis Hash 实现的短期记忆

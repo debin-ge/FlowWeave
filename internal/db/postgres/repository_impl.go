@@ -35,6 +35,7 @@ type ConversationTrace = port.ConversationTrace
 type LLMCallTraceRecord = port.LLMCallTraceRecord
 type LLMTraceRequest = port.LLMTraceRequest
 type LLMTraceResponse = port.LLMTraceResponse
+type ExternalAsyncTask = port.ExternalAsyncTask
 
 const (
 	WorkflowStatusActive = port.WorkflowStatusActive
@@ -198,6 +199,53 @@ func (r *Repository) EnsureLLMTracesTable(ctx context.Context) error {
 	CREATE INDEX IF NOT EXISTS idx_llm_traces_conv ON llm_call_traces(conversation_id);
 	CREATE INDEX IF NOT EXISTS idx_llm_traces_run ON llm_call_traces(run_id);
 	CREATE INDEX IF NOT EXISTS idx_llm_traces_scope ON llm_call_traces(org_id, tenant_id);
+	`
+	_, err := r.db.ExecContext(ctx, ddl)
+	return err
+}
+
+// EnsureExternalAsyncTaskTable 确保统一外部异步任务表存在
+func (r *Repository) EnsureExternalAsyncTaskTable(ctx context.Context) error {
+	ddl := `
+	CREATE TABLE IF NOT EXISTS external_async_tasks (
+		id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		task_type            VARCHAR(64) NOT NULL,
+		provider             VARCHAR(64) NOT NULL,
+		provider_task_ref    VARCHAR(256) NOT NULL,
+		run_id               UUID REFERENCES workflow_runs(id) ON DELETE SET NULL,
+		workflow_id          UUID REFERENCES workflows(id) ON DELETE SET NULL,
+		node_id              VARCHAR(255) DEFAULT '',
+		org_id               UUID,
+		tenant_id            UUID,
+		conversation_id      VARCHAR(255) DEFAULT '',
+		status               VARCHAR(32) NOT NULL DEFAULT 'submitted',
+		submitted_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		started_at           TIMESTAMPTZ,
+		completed_at         TIMESTAMPTZ,
+		callback_received_at TIMESTAMPTZ,
+		next_poll_at         TIMESTAMPTZ,
+		poll_count           INTEGER NOT NULL DEFAULT 0,
+		callback_mode        VARCHAR(32) NOT NULL DEFAULT 'none',
+		callback_token       VARCHAR(128) DEFAULT '',
+		callback_url         VARCHAR(1024) DEFAULT '',
+		submit_payload       JSONB,
+		query_payload        JSONB,
+		result_payload       JSONB,
+		normalized_result    JSONB,
+		result_url           VARCHAR(2048) DEFAULT '',
+		error_code           VARCHAR(128) DEFAULT '',
+		error_message        TEXT DEFAULT '',
+		version              BIGINT NOT NULL DEFAULT 1,
+		created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS uk_external_async_tasks_provider_ref ON external_async_tasks(provider, provider_task_ref);
+	CREATE UNIQUE INDEX IF NOT EXISTS uk_external_async_tasks_callback_token ON external_async_tasks(callback_token) WHERE callback_token <> '';
+	CREATE INDEX IF NOT EXISTS idx_external_async_tasks_status_next_poll ON external_async_tasks(status, next_poll_at);
+	CREATE INDEX IF NOT EXISTS idx_external_async_tasks_scope_created ON external_async_tasks(org_id, tenant_id, created_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_external_async_tasks_run ON external_async_tasks(run_id);
+	CREATE INDEX IF NOT EXISTS idx_external_async_tasks_workflow_node ON external_async_tasks(workflow_id, node_id);
+	CREATE INDEX IF NOT EXISTS idx_external_async_tasks_provider_updated ON external_async_tasks(provider, updated_at DESC);
 	`
 	_, err := r.db.ExecContext(ctx, ddl)
 	return err
@@ -767,6 +815,163 @@ func (r *Repository) ListLLMTraces(ctx context.Context, conversationID string) (
 		records = append(records, rec)
 	}
 	return records, nil
+}
+
+// --- ExternalAsyncTask 统一外部异步任务 ---
+
+func (r *Repository) CreateExternalAsyncTask(ctx context.Context, task *ExternalAsyncTask) error {
+	if task == nil {
+		return fmt.Errorf("external async task is nil")
+	}
+	if task.ID == "" {
+		task.ID = uuid.New().String()
+	}
+	now := time.Now()
+	if task.SubmittedAt.IsZero() {
+		task.SubmittedAt = now
+	}
+	if task.CreatedAt.IsZero() {
+		task.CreatedAt = now
+	}
+	task.UpdatedAt = now
+	if task.Status == "" {
+		task.Status = port.AsyncTaskStatusSubmitted
+	}
+	if task.Version <= 0 {
+		task.Version = 1
+	}
+
+	submitJSON, _ := json.Marshal(task.SubmitPayload)
+	queryJSON, _ := json.Marshal(task.QueryPayload)
+	resultJSON, _ := json.Marshal(task.ResultPayload)
+	normalizedJSON, _ := json.Marshal(task.NormalizedResult)
+
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO external_async_tasks
+		(id, task_type, provider, provider_task_ref, run_id, workflow_id, node_id, org_id, tenant_id, conversation_id,
+		 status, submitted_at, started_at, completed_at, callback_received_at, next_poll_at, poll_count, callback_mode,
+		 callback_token, callback_url, submit_payload, query_payload, result_payload, normalized_result, result_url,
+		 error_code, error_message, version, created_at, updated_at)
+		 VALUES
+		($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+		 $11,$12,$13,$14,$15,$16,$17,$18,
+		 $19,$20,$21,$22,$23,$24,$25,
+		 $26,$27,$28,$29,$30)
+		 ON CONFLICT (provider, provider_task_ref) DO UPDATE SET
+		   status=EXCLUDED.status,
+		   query_payload=COALESCE(EXCLUDED.query_payload, external_async_tasks.query_payload),
+		   result_payload=COALESCE(EXCLUDED.result_payload, external_async_tasks.result_payload),
+		   normalized_result=COALESCE(EXCLUDED.normalized_result, external_async_tasks.normalized_result),
+		   result_url=CASE WHEN EXCLUDED.result_url <> '' THEN EXCLUDED.result_url ELSE external_async_tasks.result_url END,
+		   error_code=CASE WHEN EXCLUDED.error_code <> '' THEN EXCLUDED.error_code ELSE external_async_tasks.error_code END,
+		   error_message=CASE WHEN EXCLUDED.error_message <> '' THEN EXCLUDED.error_message ELSE external_async_tasks.error_message END,
+		   callback_received_at=COALESCE(EXCLUDED.callback_received_at, external_async_tasks.callback_received_at),
+		   next_poll_at=COALESCE(EXCLUDED.next_poll_at, external_async_tasks.next_poll_at),
+		   poll_count=GREATEST(external_async_tasks.poll_count, EXCLUDED.poll_count),
+		   completed_at=COALESCE(EXCLUDED.completed_at, external_async_tasks.completed_at),
+		   updated_at=NOW(),
+		   version=external_async_tasks.version+1`,
+		task.ID, task.TaskType, task.Provider, task.ProviderTaskRef, nullIfEmpty(task.RunID), nullIfEmpty(task.WorkflowID), task.NodeID,
+		nullIfEmpty(task.OrgID), nullIfEmpty(task.TenantID), task.ConversationID,
+		task.Status, task.SubmittedAt, task.StartedAt, task.CompletedAt, task.CallbackReceivedAt, task.NextPollAt, task.PollCount, task.CallbackMode,
+		task.CallbackToken, task.CallbackURL, submitJSON, queryJSON, resultJSON, normalizedJSON, task.ResultURL,
+		task.ErrorCode, task.ErrorMessage, task.Version, task.CreatedAt, task.UpdatedAt,
+	)
+	return err
+}
+
+func (r *Repository) GetExternalAsyncTask(ctx context.Context, id string) (*ExternalAsyncTask, error) {
+	query := `SELECT id, task_type, provider, provider_task_ref,
+	          COALESCE(run_id::text,''), COALESCE(workflow_id::text,''), COALESCE(node_id,''),
+	          COALESCE(org_id::text,''), COALESCE(tenant_id::text,''), COALESCE(conversation_id,''),
+	          status, submitted_at, started_at, completed_at, callback_received_at, next_poll_at, poll_count,
+	          COALESCE(callback_mode,''), COALESCE(callback_token,''), COALESCE(callback_url,''),
+	          submit_payload, query_payload, result_payload, normalized_result, COALESCE(result_url,''),
+	          COALESCE(error_code,''), COALESCE(error_message,''), version, created_at, updated_at
+	          FROM external_async_tasks WHERE id = $1`
+	args := []interface{}{id}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND org_id = $2 AND tenant_id = $3`
+		args = append(args, scope.OrgID, scope.TenantID)
+	}
+	return r.scanExternalAsyncTaskRow(r.db.QueryRowContext(ctx, query, args...))
+}
+
+func (r *Repository) GetExternalAsyncTaskByProviderRef(ctx context.Context, providerName, providerTaskRef string) (*ExternalAsyncTask, error) {
+	query := `SELECT id, task_type, provider, provider_task_ref,
+	          COALESCE(run_id::text,''), COALESCE(workflow_id::text,''), COALESCE(node_id,''),
+	          COALESCE(org_id::text,''), COALESCE(tenant_id::text,''), COALESCE(conversation_id,''),
+	          status, submitted_at, started_at, completed_at, callback_received_at, next_poll_at, poll_count,
+	          COALESCE(callback_mode,''), COALESCE(callback_token,''), COALESCE(callback_url,''),
+	          submit_payload, query_payload, result_payload, normalized_result, COALESCE(result_url,''),
+	          COALESCE(error_code,''), COALESCE(error_message,''), version, created_at, updated_at
+	          FROM external_async_tasks WHERE provider = $1 AND provider_task_ref = $2`
+	args := []interface{}{providerName, providerTaskRef}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND org_id = $3 AND tenant_id = $4`
+		args = append(args, scope.OrgID, scope.TenantID)
+	}
+	return r.scanExternalAsyncTaskRow(r.db.QueryRowContext(ctx, query, args...))
+}
+
+func (r *Repository) UpdateExternalAsyncTask(ctx context.Context, task *ExternalAsyncTask) error {
+	if task == nil {
+		return fmt.Errorf("external async task is nil")
+	}
+	task.UpdatedAt = time.Now()
+	queryJSON, _ := json.Marshal(task.QueryPayload)
+	resultJSON, _ := json.Marshal(task.ResultPayload)
+	normalizedJSON, _ := json.Marshal(task.NormalizedResult)
+
+	query := `UPDATE external_async_tasks SET
+	          status=$1, started_at=$2, completed_at=$3, callback_received_at=$4, next_poll_at=$5, poll_count=$6,
+	          query_payload=$7, result_payload=$8, normalized_result=$9, result_url=$10,
+	          error_code=$11, error_message=$12, version=version+1, updated_at=$13
+	          WHERE id=$14`
+	args := []interface{}{
+		task.Status, task.StartedAt, task.CompletedAt, task.CallbackReceivedAt, task.NextPollAt, task.PollCount,
+		queryJSON, resultJSON, normalizedJSON, task.ResultURL,
+		task.ErrorCode, task.ErrorMessage, task.UpdatedAt, task.ID,
+	}
+	if scope := scopeFromContext(ctx); scope != nil {
+		query += ` AND org_id=$15 AND tenant_id=$16`
+		args = append(args, scope.OrgID, scope.TenantID)
+	}
+	_, err := r.db.ExecContext(ctx, query, args...)
+	return err
+}
+
+func (r *Repository) scanExternalAsyncTaskRow(row *sql.Row) (*ExternalAsyncTask, error) {
+	task := &ExternalAsyncTask{}
+	var submitJSON, queryJSON, resultJSON, normalizedJSON json.RawMessage
+	err := row.Scan(
+		&task.ID, &task.TaskType, &task.Provider, &task.ProviderTaskRef,
+		&task.RunID, &task.WorkflowID, &task.NodeID,
+		&task.OrgID, &task.TenantID, &task.ConversationID,
+		&task.Status, &task.SubmittedAt, &task.StartedAt, &task.CompletedAt, &task.CallbackReceivedAt, &task.NextPollAt, &task.PollCount,
+		&task.CallbackMode, &task.CallbackToken, &task.CallbackURL,
+		&submitJSON, &queryJSON, &resultJSON, &normalizedJSON, &task.ResultURL,
+		&task.ErrorCode, &task.ErrorMessage, &task.Version, &task.CreatedAt, &task.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(submitJSON) > 0 {
+		_ = json.Unmarshal(submitJSON, &task.SubmitPayload)
+	}
+	if len(queryJSON) > 0 {
+		_ = json.Unmarshal(queryJSON, &task.QueryPayload)
+	}
+	if len(resultJSON) > 0 {
+		_ = json.Unmarshal(resultJSON, &task.ResultPayload)
+	}
+	if len(normalizedJSON) > 0 {
+		_ = json.Unmarshal(normalizedJSON, &task.NormalizedResult)
+	}
+	return task, nil
 }
 
 // --- Organization CRUD ---

@@ -15,6 +15,8 @@ require (
 	github.com/nguyenthenguyen/docx v0.0.0-20230621112118-9c8e795a11db
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/samber/slog-zap/v2 v2.6.3
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/asr v1.3.46
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.51
 	github.com/tencentcloud/tencentcloud-speech-sdk-go v1.0.19
 	go.uber.org/zap v1.27.1
 )

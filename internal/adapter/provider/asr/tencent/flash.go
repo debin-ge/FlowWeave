@@ -11,7 +11,7 @@ import (
 	tcasr "github.com/tencentcloud/tencentcloud-speech-sdk-go/asr"
 	"github.com/tencentcloud/tencentcloud-speech-sdk-go/common"
 
-	"flowweave/internal/provider"
+	asrprovider "flowweave/internal/adapter/provider/asr"
 )
 
 const ProviderName = "tencent_flash"
@@ -49,7 +49,7 @@ func (p *FlashProvider) Name() string {
 	return ProviderName
 }
 
-func (p *FlashProvider) Transcribe(ctx context.Context, req *provider.ASRTranscribeRequest) (*provider.ASRTranscribeResult, error) {
+func (p *FlashProvider) Transcribe(ctx context.Context, req *asrprovider.ASRTranscribeRequest) (*asrprovider.ASRTranscribeResult, error) {
 	if req == nil || len(req.AudioBytes) == 0 {
 		return nil, fmt.Errorf("empty audio bytes")
 	}
@@ -77,14 +77,14 @@ func (p *FlashProvider) Transcribe(ctx context.Context, req *provider.ASRTranscr
 		return nil, fmt.Errorf("tencent flash recognize failed: %w", err)
 	}
 
-	segments := make([]provider.ASRSegment, 0)
+	segments := make([]asrprovider.ASRSegment, 0)
 	texts := make([]string, 0, len(resp.FlashResult))
 	for _, ch := range resp.FlashResult {
 		if strings.TrimSpace(ch.Text) != "" {
 			texts = append(texts, ch.Text)
 		}
 		for _, sentence := range ch.SentenceList {
-			segments = append(segments, provider.ASRSegment{
+			segments = append(segments, asrprovider.ASRSegment{
 				Text:    sentence.Text,
 				StartMs: int64(sentence.StartTime),
 				EndMs:   int64(sentence.EndTime),
@@ -93,7 +93,7 @@ func (p *FlashProvider) Transcribe(ctx context.Context, req *provider.ASRTranscr
 		}
 	}
 
-	return &provider.ASRTranscribeResult{
+	return &asrprovider.ASRTranscribeResult{
 		Text:      strings.Join(texts, "\n"),
 		Segments:  segments,
 		RequestID: resp.RequestId,
@@ -107,7 +107,7 @@ func (p *FlashProvider) Transcribe(ctx context.Context, req *provider.ASRTranscr
 	}, nil
 }
 
-func detectVoiceFormat(req *provider.ASRTranscribeRequest) string {
+func detectVoiceFormat(req *asrprovider.ASRTranscribeRequest) string {
 	if req != nil {
 		if s, ok := req.Options["voice_format"].(string); ok && strings.TrimSpace(s) != "" {
 			return strings.ToLower(strings.TrimSpace(s))

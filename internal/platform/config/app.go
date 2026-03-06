@@ -91,12 +91,14 @@ type GatewayConfig struct {
 }
 
 type ASRConfig struct {
-	TempDir            string           `json:"temp_dir"`
-	MaxAudioMB         int              `json:"max_audio_mb"`
-	MaxBase64Chars     int              `json:"max_base64_chars"`
-	URLFetchTimeoutMS  int              `json:"url_fetch_timeout_ms"`
-	TempFileTTLMinutes int              `json:"temp_file_ttl_minutes"`
-	Tencent            TencentASRConfig `json:"tencent"`
+	TempDir            string              `json:"temp_dir"`
+	MaxAudioMB         int                 `json:"max_audio_mb"`
+	MaxBase64Chars     int                 `json:"max_base64_chars"`
+	URLFetchTimeoutMS  int                 `json:"url_fetch_timeout_ms"`
+	TempFileTTLMinutes int                 `json:"temp_file_ttl_minutes"`
+	Tencent            TencentASRConfig    `json:"tencent"`
+	TencentRec         TencentRecASRConfig `json:"tencent_rec"`
+	Async              ASRAsyncConfig      `json:"async"`
 }
 
 type TencentASRConfig struct {
@@ -104,6 +106,19 @@ type TencentASRConfig struct {
 	SecretID   string `json:"secret_id"`
 	SecretKey  string `json:"secret_key"`
 	EngineType string `json:"engine_type"`
+}
+
+type TencentRecASRConfig struct {
+	SecretID        string `json:"secret_id"`
+	SecretKey       string `json:"secret_key"`
+	Region          string `json:"region"`
+	EngineModelType string `json:"engine_model_type"`
+}
+
+type ASRAsyncConfig struct {
+	CallbackBaseURL string `json:"callback_base_url"`
+	PollIntervalMS  int    `json:"poll_interval_ms"`
+	WaitTimeoutMS   int    `json:"wait_timeout_ms"`
 }
 
 // Default 返回默认配置。
@@ -162,6 +177,14 @@ func Default() *AppConfig {
 			TempFileTTLMinutes: 120,
 			Tencent: TencentASRConfig{
 				EngineType: "16k_zh",
+			},
+			TencentRec: TencentRecASRConfig{
+				Region:          "ap-shanghai",
+				EngineModelType: "16k_zh",
+			},
+			Async: ASRAsyncConfig{
+				PollIntervalMS: 1500,
+				WaitTimeoutMS:  120000,
 			},
 		},
 		RAG: *ragCfg,
@@ -259,6 +282,13 @@ func (c *AppConfig) applyEnv() {
 	applyString("TENCENT_ASR_SECRET_ID", &c.ASR.Tencent.SecretID)
 	applyString("TENCENT_ASR_SECRET_KEY", &c.ASR.Tencent.SecretKey)
 	applyString("TENCENT_ASR_ENGINE_TYPE", &c.ASR.Tencent.EngineType)
+	applyString("TENCENT_REC_SECRET_ID", &c.ASR.TencentRec.SecretID)
+	applyString("TENCENT_REC_SECRET_KEY", &c.ASR.TencentRec.SecretKey)
+	applyString("TENCENT_REC_REGION", &c.ASR.TencentRec.Region)
+	applyString("TENCENT_REC_ENGINE_MODEL_TYPE", &c.ASR.TencentRec.EngineModelType)
+	applyString("ASR_CALLBACK_BASE_URL", &c.ASR.Async.CallbackBaseURL)
+	applyInt("ASR_REC_POLL_INTERVAL_MS", &c.ASR.Async.PollIntervalMS)
+	applyInt("ASR_REC_MAX_WAIT_MS", &c.ASR.Async.WaitTimeoutMS)
 
 	// RAG 环境变量
 	applyString("OPENSEARCH_URL", &c.RAG.OpenSearchURL)
@@ -323,6 +353,18 @@ func (c *AppConfig) normalize() {
 	}
 	if c.ASR.Tencent.EngineType == "" {
 		c.ASR.Tencent.EngineType = "16k_zh"
+	}
+	if c.ASR.TencentRec.Region == "" {
+		c.ASR.TencentRec.Region = "ap-shanghai"
+	}
+	if c.ASR.TencentRec.EngineModelType == "" {
+		c.ASR.TencentRec.EngineModelType = "16k_zh"
+	}
+	if c.ASR.Async.PollIntervalMS <= 0 {
+		c.ASR.Async.PollIntervalMS = 1500
+	}
+	if c.ASR.Async.WaitTimeoutMS <= 0 {
+		c.ASR.Async.WaitTimeoutMS = 120000
 	}
 }
 

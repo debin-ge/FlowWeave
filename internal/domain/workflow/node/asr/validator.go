@@ -11,6 +11,13 @@ func ValidateASRNodeData(data *ASRNodeData) error {
 	if strings.TrimSpace(data.Provider) == "" {
 		return newError(ASRInvalidConfig, "provider is required", nil)
 	}
+	if strings.TrimSpace(data.AsyncMode) != "" {
+		switch data.AsyncMode {
+		case "submit_only", "submit_and_wait":
+		default:
+			return newError(ASRInvalidConfig, "unsupported async_mode: "+data.AsyncMode, nil)
+		}
+	}
 	if strings.TrimSpace(data.AudioSource.Type) == "" {
 		return newError(ASRInvalidConfig, "audio_source.type is required", nil)
 	}
@@ -27,6 +34,12 @@ func ValidateASRNodeData(data *ASRNodeData) error {
 	}
 	if data.MaxRetries < 0 {
 		return newError(ASRInvalidConfig, "max_retries cannot be negative", nil)
+	}
+	if data.PollIntervalMS < 0 {
+		return newError(ASRInvalidConfig, "poll_interval_ms cannot be negative", nil)
+	}
+	if data.WaitTimeoutMS < 0 {
+		return newError(ASRInvalidConfig, "wait_timeout_ms cannot be negative", nil)
 	}
 	return nil
 }

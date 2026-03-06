@@ -1,10 +1,11 @@
 package bootstrap
 
 import (
+	asrprovider "flowweave/internal/adapter/provider/asr"
+	tencentasr "flowweave/internal/adapter/provider/asr/tencent"
+	"flowweave/internal/adapter/provider/llm"
 	"flowweave/internal/adapter/provider/llm/openai"
 	applog "flowweave/internal/platform/log"
-	"flowweave/internal/provider"
-	tencentasr "flowweave/internal/provider/asr/tencent"
 )
 
 // RegisterLLMProviders registers configured LLM providers.
@@ -30,16 +31,28 @@ func RegisterASRProviders(
 	maxAudioMB int,
 	maxBase64Chars int,
 	urlFetchTimeoutMS int,
+	asyncCallbackBaseURL string,
+	asyncPollIntervalMS int,
+	asyncWaitTimeoutMS int,
 	appID string,
 	secretID string,
 	secretKey string,
 	engineType string,
+	recSecretID string,
+	recSecretKey string,
+	recRegion string,
+	recEngineModelType string,
 ) {
-	provider.SetASRRuntimeConfig(provider.ASRRuntimeConfig{
+	asrprovider.SetASRRuntimeConfig(asrprovider.ASRRuntimeConfig{
 		TempDir:           tempDir,
 		MaxAudioMB:        maxAudioMB,
 		MaxBase64Chars:    maxBase64Chars,
 		URLFetchTimeoutMS: urlFetchTimeoutMS,
+	})
+	asrprovider.SetASRAsyncRuntimeConfig(asrprovider.ASRAsyncRuntimeConfig{
+		CallbackBaseURL:       asyncCallbackBaseURL,
+		DefaultPollIntervalMS: asyncPollIntervalMS,
+		DefaultWaitTimeoutMS:  asyncWaitTimeoutMS,
 	})
 
 	if appID == "" || secretID == "" || secretKey == "" {
@@ -57,6 +70,24 @@ func RegisterASRProviders(
 		applog.Warnf("⚠️  Failed to init Tencent ASR provider: %v", err)
 		return
 	}
-	provider.RegisterASRProvider(p)
+	asrprovider.RegisterASRProvider(p)
 	applog.Infof("✅ Registered ASR provider: %s", p.Name())
+
+	if recSecretID == "" || recSecretKey == "" {
+		applog.Warn("⚠️  Tencent RecTask credentials missing, async ASR provider not registered")
+		return
+	}
+
+	asyncProvider, err := tencentasr.NewRecTaskProvider(tencentasr.RecTaskConfig{
+		SecretID:          recSecretID,
+		SecretKey:         recSecretKey,
+		Region:            recRegion,
+		DefaultEngineType: recEngineModelType,
+	})
+	if err != nil {
+		applog.Warnf("⚠️  Failed to init Tencent RecTask ASR provider: %v", err)
+		return
+	}
+	asrprovider.RegisterASRAsyncProvider(asyncProvider)
+	applog.Infof("✅ Registered ASR async provider: %s (region: %s)", asyncProvider.Name(), recRegion)
 }

@@ -177,6 +177,18 @@ func (m *AsyncRunManager) persistRunAndNodeExecs(ctx context.Context, run *port.
 			return err
 		}
 	}
+	externalTasks := BuildExternalAsyncTasksFromNodeExecs(run, nodeExecs)
+	for _, task := range externalTasks {
+		if err := m.repo.CreateExternalAsyncTask(ctx, task); err != nil {
+			applog.Error("[AsyncRun] Failed to save external async task",
+				"run_id", run.ID,
+				"node_id", task.NodeID,
+				"provider", task.Provider,
+				"provider_task_ref", task.ProviderTaskRef,
+				"error", err,
+			)
+		}
+	}
 	return m.repo.UpdateRun(ctx, run)
 }
 

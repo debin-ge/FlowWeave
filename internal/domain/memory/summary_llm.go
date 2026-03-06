@@ -1,12 +1,12 @@
 package memory
 
 import (
-	applog "flowweave/internal/platform/log"
 	"context"
+	applog "flowweave/internal/platform/log"
 	"fmt"
 	"strings"
 
-	"flowweave/internal/provider"
+	"flowweave/internal/adapter/provider/llm"
 )
 
 // LLMSummaryGenerator 使用 LLM 生成对话摘要

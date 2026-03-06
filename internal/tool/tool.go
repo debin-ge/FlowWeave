@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"flowweave/internal/provider"
+	"flowweave/internal/adapter/provider/llm"
 )
 
 // Tool 工具接口

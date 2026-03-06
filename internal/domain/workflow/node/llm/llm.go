@@ -1,21 +1,21 @@
 package llm
 
 import (
-	applog "flowweave/internal/platform/log"
 	"context"
 	"encoding/json"
+	applog "flowweave/internal/platform/log"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"flowweave/internal/adapter/provider/llm"
 	"flowweave/internal/domain/memory"
 	"flowweave/internal/domain/workflow/event"
 	types "flowweave/internal/domain/workflow/model"
 	"flowweave/internal/domain/workflow/node"
 	"flowweave/internal/domain/workflow/port"
-	"flowweave/internal/provider"
 	"flowweave/internal/tool"
 )
 

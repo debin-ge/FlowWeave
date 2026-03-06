@@ -3,7 +3,7 @@ package memory
 import (
 	"context"
 
-	"flowweave/internal/provider"
+	"flowweave/internal/adapter/provider/llm"
 )
 
 // ShortTermMemory 短期记忆接口

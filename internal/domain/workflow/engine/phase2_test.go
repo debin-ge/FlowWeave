@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"flowweave/internal/adapter/provider/llm"
+	providerPkg "flowweave/internal/adapter/provider/llm"
 	"flowweave/internal/app/workflow"
 	"flowweave/internal/domain/workflow/event"
 	"flowweave/internal/domain/workflow/node/code"
-	"flowweave/internal/provider"
-	providerPkg "flowweave/internal/provider"
 )
 
 // mockLLMProvider 用于测试的 Mock LLM Provider

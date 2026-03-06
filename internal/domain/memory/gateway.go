@@ -1,13 +1,13 @@
 package memory
 
 import (
-	applog "flowweave/internal/platform/log"
 	"context"
 	"encoding/json"
+	applog "flowweave/internal/platform/log"
 	"fmt"
 	"strings"
 
-	"flowweave/internal/provider"
+	"flowweave/internal/adapter/provider/llm"
 )
 
 // GatewayCompressor Context-Gateway 压缩器

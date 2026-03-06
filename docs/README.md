@@ -11,6 +11,11 @@
 - [部署文档](./DEPLOYMENT.md)
 - [Loop Node PRD V1](./PRD_LOOP_NODE_V1.md)
 - [Loop Node TDD V1](./TDD_LOOP_NODE_V1.md)
+- [ASR Node PRD V1](./PRD_ASR_NODE_V1.md)
+- [ASR Node TDD V1](./TDD_ASR_NODE_V1.md)
+- [ASR Async Task Framework PRD V1](./PRD_ASR_ASYNC_TASK_FRAMEWORK_V1.md)
+- [ASR Async Task Framework TDD V1](./TDD_ASR_ASYNC_TASK_FRAMEWORK_V1.md)
+- [ASR Async DSL Examples](./ASR_ASYNC_DSL_EXAMPLES.md)
 
 ## 建议阅读顺序
 

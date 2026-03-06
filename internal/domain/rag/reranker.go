@@ -1,14 +1,14 @@
 package rag
 
 import (
-	applog "flowweave/internal/platform/log"
 	"context"
 	"encoding/json"
+	applog "flowweave/internal/platform/log"
 	"fmt"
 	"sort"
 	"time"
 
-	"flowweave/internal/provider"
+	"flowweave/internal/adapter/provider/llm"
 )
 
 // ── Reranker 接口 ─────────────────────────────────────────────

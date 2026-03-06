@@ -138,14 +138,15 @@ func (s *Server) buildRouter() (http.Handler, error) {
 	}
 	authMW := authMiddleware(jwtCfg, s.repo)
 
-	s.registerPublicRoutes(r, orgHandler, tenantHandler)
+	s.registerPublicRoutes(r, workflowHandler, orgHandler, tenantHandler)
 	s.registerProtectedRoutes(r, authMW, workflowHandler, orgHandler, tenantHandler, ragEnabled)
 	return r, nil
 }
 
-func (s *Server) registerPublicRoutes(r chi.Router, orgHandler *OrganizationHandler, tenantHandler *TenantHandler) {
+func (s *Server) registerPublicRoutes(r chi.Router, workflowHandler *WorkflowHandler, orgHandler *OrganizationHandler, tenantHandler *TenantHandler) {
 	orgHandler.RegisterPublicRoutes(r)
 	tenantHandler.RegisterPublicRoutes(r)
+	r.Post("/api/v1/callbacks/async-tasks/{provider}", workflowHandler.HandleAsyncTaskCallback)
 }
 
 func (s *Server) registerProtectedRoutes(

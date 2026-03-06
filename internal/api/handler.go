@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	applog "flowweave/internal/platform/log"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -56,6 +57,7 @@ func (h *WorkflowHandler) RegisterRoutes(r chi.Router) {
 	})
 	r.Get("/api/v1/runs/{id}", h.GetRun)
 	r.Get("/api/v1/runs/{id}/nodes", h.ListNodeExecutions)
+	r.Get("/api/v1/async-tasks/{id}", h.GetExternalAsyncTask)
 	r.Get("/api/v1/traces/{conversation_id}", h.GetTrace)
 }
 
@@ -587,6 +589,18 @@ func (h *WorkflowHandler) persistRunAndNodeExecs(ctx context.Context, run *port.
 			applog.Error("[Workflow/Persist] Failed to save node executions", "run_id", run.ID, "error", err)
 		}
 	}
+	externalTasks := workflow.BuildExternalAsyncTasksFromNodeExecs(run, nodeExecs)
+	for _, task := range externalTasks {
+		if err := h.repo.CreateExternalAsyncTask(ctx, task); err != nil {
+			applog.Error("[Workflow/Persist] Failed to save external async task",
+				"run_id", run.ID,
+				"node_id", task.NodeID,
+				"provider", task.Provider,
+				"provider_task_ref", task.ProviderTaskRef,
+				"error", err,
+			)
+		}
+	}
 	if err := h.repo.UpdateRun(ctx, run); err != nil {
 		applog.Error("[Workflow/Persist] Failed to update run", "run_id", run.ID, "error", err)
 	}
@@ -742,6 +756,187 @@ func (h *WorkflowHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 
 	// 构建响应 DTO
 	writeJSON(w, http.StatusOK, run)
+}
+
+func (h *WorkflowHandler) GetExternalAsyncTask(w http.ResponseWriter, r *http.Request) {
+	ctx, _ := h.injectScope(r.Context())
+	id := chi.URLParam(r, "id")
+
+	task, err := h.repo.GetExternalAsyncTask(ctx, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get external async task")
+		return
+	}
+	if task == nil {
+		writeError(w, http.StatusNotFound, "external async task not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (h *WorkflowHandler) HandleAsyncTaskCallback(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	providerName := strings.TrimSpace(chi.URLParam(r, "provider"))
+	if providerName == "" {
+		writeError(w, http.StatusBadRequest, "provider is required")
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read callback body")
+		return
+	}
+	var payload map[string]interface{}
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid callback JSON body")
+			return
+		}
+	}
+	if payload == nil {
+		payload = map[string]interface{}{}
+	}
+
+	providerTaskRef := extractProviderTaskRef(payload)
+	if providerTaskRef == "" {
+		writeError(w, http.StatusBadRequest, "provider_task_ref is required")
+		return
+	}
+
+	task, err := h.repo.GetExternalAsyncTaskByProviderRef(ctx, providerName, providerTaskRef)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to query external async task")
+		return
+	}
+	if task == nil {
+		writeError(w, http.StatusNotFound, "external async task not found")
+		return
+	}
+	if task.CallbackToken != "" {
+		token := strings.TrimSpace(r.URL.Query().Get("token"))
+		if token == "" || token != task.CallbackToken {
+			writeError(w, http.StatusUnauthorized, "invalid callback token")
+			return
+		}
+	}
+
+	now := time.Now()
+	task.CallbackReceivedAt = &now
+	task.ResultPayload = payload
+	status := normalizeCallbackTaskStatus(payload)
+	if status != "" {
+		task.Status = status
+	}
+	if status == port.AsyncTaskStatusSucceeded || status == port.AsyncTaskStatusFailed || status == port.AsyncTaskStatusCanceled || status == port.AsyncTaskStatusExpired || status == port.AsyncTaskStatusTimeout {
+		task.CompletedAt = &now
+	}
+	if status == port.AsyncTaskStatusFailed {
+		task.ErrorCode = firstNonEmpty(extractString(payload, "error_code"), "ASYNC_CALLBACK_FAILED")
+		task.ErrorMessage = firstNonEmpty(extractString(payload, "error_message"), extractString(payload, "error_msg"), extractString(payload, "errmsg"))
+	}
+
+	if text := firstNonEmpty(extractString(payload, "result"), extractString(payload, "text"), extractString(payload, "result_text")); text != "" {
+		if task.NormalizedResult == nil {
+			task.NormalizedResult = map[string]interface{}{}
+		}
+		task.NormalizedResult["text"] = text
+	}
+
+	if err := h.repo.UpdateExternalAsyncTask(ctx, task); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update external async task")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok":                true,
+		"provider":          providerName,
+		"provider_task_ref": providerTaskRef,
+		"status":            task.Status,
+	})
+}
+
+func extractProviderTaskRef(payload map[string]interface{}) string {
+	return firstNonEmpty(
+		extractString(payload, "provider_task_ref"),
+		extractString(payload, "task_id"),
+		extractString(payload, "TaskId"),
+	)
+}
+
+func normalizeCallbackTaskStatus(payload map[string]interface{}) port.AsyncTaskStatus {
+	s := strings.ToLower(strings.TrimSpace(firstNonEmpty(
+		extractString(payload, "status"),
+		extractString(payload, "status_str"),
+		extractString(payload, "StatusStr"),
+	)))
+	switch s {
+	case "", "waiting", "queued", "submitted":
+		return port.AsyncTaskStatusSubmitted
+	case "running", "doing", "processing", "in_progress":
+		return port.AsyncTaskStatusRunning
+	case "success", "succeeded", "completed":
+		return port.AsyncTaskStatusSucceeded
+	case "failed", "error":
+		return port.AsyncTaskStatusFailed
+	case "canceled", "cancelled":
+		return port.AsyncTaskStatusCanceled
+	case "expired":
+		return port.AsyncTaskStatusExpired
+	case "timeout", "timed_out":
+		return port.AsyncTaskStatusTimeout
+	}
+
+	iv := extractInt(payload, "status")
+	switch iv {
+	case 0:
+		return port.AsyncTaskStatusSubmitted
+	case 1:
+		return port.AsyncTaskStatusRunning
+	case 2:
+		return port.AsyncTaskStatusSucceeded
+	case 3:
+		return port.AsyncTaskStatusFailed
+	}
+	return ""
+}
+
+func extractString(payload map[string]interface{}, key string) string {
+	if payload == nil {
+		return ""
+	}
+	raw, ok := payload[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	switch v := raw.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case json.Number:
+		return strings.TrimSpace(v.String())
+	case float64:
+		return strings.TrimSpace(strconv.FormatInt(int64(v), 10))
+	default:
+		return ""
+	}
+}
+
+func extractInt(payload map[string]interface{}, key string) int {
+	s := extractString(payload, key)
+	if s == "" {
+		return 0
+	}
+	n, _ := strconv.Atoi(s)
+	return n
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 // ListNodeExecutions 查询某次执行的节点执行记录

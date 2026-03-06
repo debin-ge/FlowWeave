@@ -1,14 +1,14 @@
 package memory
 
 import (
-	applog "flowweave/internal/platform/log"
 	"context"
+	applog "flowweave/internal/platform/log"
 	"reflect"
 	"sync"
 	"time"
 
+	"flowweave/internal/adapter/provider/llm"
 	"flowweave/internal/domain/workflow/port"
-	"flowweave/internal/provider"
 )
 
 // Coordinator 记忆协调器，编排三层记忆的加载和存储
